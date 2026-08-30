@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jaywavfeng/tiered-agent-orchestrator/schemas/review-status.schema.json",
+  "title": "Tiered Agent Review Status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "reviewer_id",
+    "status",
+    "summary",
+    "verification",
+    "last_updated"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "reviewer_id": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^reviewer-[1-9][0-9]*$" }
+      ]
+    },
+    "status": {
+      "enum": ["not-requested", "ready", "active", "blocked", "completed"]
+    },
+    "summary": { "type": "string" },
+    "verification": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "last_updated": { "type": "string", "format": "date-time" }
+  }
+}

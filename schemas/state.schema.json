@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jaywavfeng/tiered-agent-orchestrator/schemas/state.schema.json",
+  "title": "Tiered Agent Project State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "phase",
+    "status",
+    "profile",
+    "current_milestone",
+    "workers",
+    "review",
+    "last_updated",
+    "next_action"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+    },
+    "phase": {
+      "enum": ["planning", "execution", "review", "complete"]
+    },
+    "status": {
+      "enum": ["active", "blocked", "waiting-owner", "complete"]
+    },
+    "profile": { "type": "string", "minLength": 1 },
+    "current_milestone": { "type": "string", "minLength": 1 },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "task_path", "status_path", "write_scope", "depends_on"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^worker-[1-9][0-9]*$" },
+          "task_path": { "type": "string" },
+          "status_path": { "type": "string" },
+          "write_scope": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^worker-[1-9][0-9]*$" },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "level",
+        "reviewer_id",
+        "task_path",
+        "status_path",
+        "report_path"
+      ],
+      "properties": {
+        "required": { "type": "boolean" },
+        "level": { "enum": ["none", "balanced", "strong"] },
+        "reviewer_id": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^reviewer-[1-9][0-9]*$" }
+          ]
+        },
+        "task_path": { "type": "string" },
+        "status_path": { "type": "string" },
+        "report_path": { "type": "string" }
+      }
+    },
+    "last_updated": { "type": "string", "format": "date-time" },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor", "instruction"],
+      "properties": {
+        "actor": { "type": "string", "minLength": 1 },
+        "instruction": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

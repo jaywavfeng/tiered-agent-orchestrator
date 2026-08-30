@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jaywavfeng/tiered-agent-orchestrator/schemas/benchmark-run.schema.json",
+  "title": "Tiered Agent Benchmark Run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "strategy",
+    "success",
+    "test_pass_rate",
+    "tokens",
+    "estimated_cost",
+    "duration_seconds",
+    "model_switches",
+    "worker_threads",
+    "escalations",
+    "user_interventions",
+    "recorded_at",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "strategy": { "enum": ["strong-only", "tiered"] },
+    "success": { "type": "boolean" },
+    "test_pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "strong", "balanced", "economy"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "strong": { "type": "integer", "minimum": 0 },
+        "balanced": { "type": "integer", "minimum": 0 },
+        "economy": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "estimated_cost": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "number", "minimum": 0 }
+      ]
+    },
+    "duration_seconds": { "type": "number", "minimum": 0 },
+    "model_switches": { "type": "integer", "minimum": 0 },
+    "worker_threads": { "type": "integer", "minimum": 0 },
+    "escalations": { "type": "integer", "minimum": 0 },
+    "user_interventions": { "type": "integer", "minimum": 0 },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "notes": { "type": "string" }
+  }
+}

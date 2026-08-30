@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "project_id": "project-id",
+  "phase": "planning",
+  "status": "active",
+  "profile": "generic",
+  "current_milestone": "Create an executable plan and bounded assignments.",
+  "workers": [],
+  "review": {
+    "required": false,
+    "level": "none",
+    "reviewer_id": null,
+    "task_path": "review/TASK.md",
+    "status_path": "review/STATUS.json",
+    "report_path": "review/REPORT.md"
+  },
+  "last_updated": "1970-01-01T00:00:00Z",
+  "next_action": {
+    "actor": "project-lead",
+    "instruction": "Inspect the repository and write PLAN.md."
+  }
+}

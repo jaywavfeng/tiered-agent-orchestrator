@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jaywavfeng/tiered-agent-orchestrator/schemas/worker-status.schema.json",
+  "title": "Tiered Agent Worker Status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "worker_id",
+    "status",
+    "summary",
+    "files_changed",
+    "verification",
+    "next_action",
+    "last_updated"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "worker_id": { "type": "string", "pattern": "^worker-[1-9][0-9]*$" },
+    "status": {
+      "enum": ["ready", "active", "blocked", "waiting-owner", "completed", "inactive"]
+    },
+    "summary": { "type": "string" },
+    "files_changed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "verification": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "next_action": { "type": "string" },
+    "last_updated": { "type": "string", "format": "date-time" }
+  }
+}

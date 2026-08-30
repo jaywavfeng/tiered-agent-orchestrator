@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "worker_id": "worker-1",
+  "status": "ready",
+  "summary": "Assignment is ready.",
+  "files_changed": [],
+  "verification": [],
+  "next_action": "Read TASK.md and begin bounded implementation.",
+  "last_updated": "1970-01-01T00:00:00Z"
+}
