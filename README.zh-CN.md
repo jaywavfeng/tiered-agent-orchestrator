@@ -6,7 +6,7 @@
 
 一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
 
-> 项目状态：v0.2.0 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.3.0 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -26,6 +26,12 @@ Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完�
 
 **你不需要复制任何上一段聊天内容。**
 
+### 成本优先执行
+
+TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，再减少 credits/成本，再减少不必要的上下文和模型切换，最后才是减少总 Token。Sol 只处理模糊需求、架构、重大决策、困难 blocker 和最终验收；Luna Worker 负责文件搜索、环境检查、实现、实验、测试、调试、数据/视频处理、远程操作和结果整理。只要昂贵模型用量和 credits 明显下降，总 Token 略有增加也是可以接受的。
+
+模型路由是硬约束。Codex 原生 subagent 支持显式模型时，Lead 必须传入 `gpt-5.6-luna` 和 High reasoning。宿主无法可靠指定模型时，Lead 不得 spawn，而应停止并提示 Owner 打开 `gpt-5.6-luna / High`，发送 `$tao continue worker-1`。TAO 不应创建一个默认继承 Sol 的 Worker 来假装完成低成本分层。
+
 ## 它会做什么
 
 - 为整个项目保留一个固定 Project Lead 对话。
@@ -39,7 +45,7 @@ Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完�
 - 提供无第三方依赖的状态校验、状态转换和管理汇总。
 - 提供成对 benchmark 工具，但不发布未经真实测量的节省结论。
 
-它**不会**自动切换顶层模型、创建指定模型对话、自动 push、部署生产环境或绕过宿主审批。
+它**不会**在无法保证低成本模型时自动切换顶层模型或创建指定模型对话，也不会自动 push、部署生产环境或绕过宿主审批。
 
 ## 快速开始
 
@@ -69,7 +75,7 @@ $HOME/.agents/skills/tiered-agent-orchestrator
 $tao 构建导入流水线、迁移现有调用方，并跑通完整集成测试。
 ```
 
-Lead 会检查仓库、创建 `.tiered-agent` 状态、决定架构，并判断委派是否真的能减少强模型工作量。
+Lead 只读取做架构决策所需的最少入口，创建 `.tiered-agent` 状态，并判断委派是否能减少强模型工作量。常规机械工作必须下放给低成本 Worker；dispatch 后 Lead 不轮询 `STATUS.json`，而是等待完成、blocker、milestone 或 Owner 事件。
 
 ### 3. 只创建一次默认 Worker，之后持续复用
 
@@ -112,6 +118,41 @@ $tao continue worker-1
 ```text
 $tao continue worker-2
 ```
+
+### Dispatch 生命周期
+
+理想的原生模式：
+
+```text
+Owner
+  ↓
+Sol Project Lead
+  ↓
+显式 spawn gpt-5.6-luna / High worker-1
+  ↓
+Sol 停止并等待事件
+  ↓
+Luna 完成检查 / 实现 / 训练
+  ↓
+milestone event
+  ↓
+Sol 读取摘要并决定下一阶段
+  ↓
+Lead 重新分配同一个 worker-1
+```
+
+无法显式指定低成本模型时：
+
+```text
+Sol Project Lead 准备 worker-1
+  ↓
+Sol 停止
+  ↓
+Owner 打开 gpt-5.6-luna / High 并发送：
+$tao continue worker-1
+```
+
+TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。
 
 ## 命令
 

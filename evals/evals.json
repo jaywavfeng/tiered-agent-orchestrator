@@ -4,11 +4,13 @@
     {
       "id": "A",
       "prompt": "Use tiered orchestration to add a production-ready import pipeline across this repository. The architecture is unclear and implementation will take several stages.",
-      "expected_output": "The Project Lead creates repository state, distills a plan, assigns one bounded economy Worker by default, and provides a one-line continuation command.",
+      "expected_output": "The Project Lead creates repository state, distills a plan, assigns one bounded economy Worker by default, explicitly routes a native Worker to the economy model when supported (or gives the Owner the manual fallback), and provides a one-line continuation command.",
       "assertions": [
         "The response initializes durable project state rather than relying on chat history.",
         "Exactly one Worker is recommended unless independent parallel work is demonstrated.",
-        "The Worker task includes scope and completion criteria."
+        "The Worker task includes scope and completion criteria.",
+        "The Lead does not use a Worker that silently inherits the strong model.",
+        "After dispatch, the Lead yields for an event instead of polling Worker status."
       ]
     },
     {

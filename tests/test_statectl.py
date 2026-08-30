@@ -139,6 +139,27 @@ class StateCtlTests(unittest.TestCase):
         state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
         self.assertEqual(state["workers"][0]["task_path"], "workers/worker-1/TASK.md")
 
+    def test_new_project_does_not_create_meaningless_reviewer(self) -> None:
+        runtime = self.init()
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        review = state["review"]
+        self.assertFalse(review["required"])
+        self.assertEqual(review["level"], "none")
+        self.assertIsNone(review["reviewer_id"])
+        status = json.loads(
+            (runtime / "review" / "STATUS.json").read_text(encoding="utf-8")
+        )
+        self.assertIsNone(status["reviewer_id"])
+        self.assertEqual(status["status"], "not-requested")
+
+    def test_v020_schema_v1_runtime_without_history_is_compatible(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        history = runtime / "workers" / "worker-1" / "history"
+        # v0.2.0 runtimes had Schema v1 but no assignment-history directory.
+        self.assertFalse(history.exists())
+        self.assertEqual(self.run_cli("validate")[0], 0)
+
     def test_blocker_recovery_and_completion_transitions(self) -> None:
         self.init()
         self.assertEqual(self.add_worker()[0], 0)

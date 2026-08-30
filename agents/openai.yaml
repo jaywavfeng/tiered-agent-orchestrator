@@ -1,6 +1,6 @@
 interface:
   display_name: "Tiered Agent Orchestrator"
-  short_description: "Persistent lead, low-cost workers, shared project state"
-  default_prompt: "Use $tao to plan and execute this large engineering goal with a persistent lead and cost-efficient workers."
+  short_description: "Sol decisions, Luna execution, durable handoffs"
+  default_prompt: "$tao Use the gpt-5.6-sol Project Lead for high-value decisions and explicit gpt-5.6-luna High Workers for routine execution; reuse worker-1 and wait for events."
 policy:
   allow_implicit_invocation: false

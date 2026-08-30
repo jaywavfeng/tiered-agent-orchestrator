@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.2.0"', frontmatter)
+        self.assertIn('version: "0.3.0"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -38,6 +38,19 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("$tao", text)
         self.assertIn("allow_implicit_invocation: false", text)
         self.assertNotIn("dependencies:", text)
+
+        short_description = re.search(
+            r'(?m)^\s+short_description:\s+"([^"]+)"$', text
+        )
+        self.assertIsNotNone(short_description)
+        self.assertGreaterEqual(len(short_description.group(1)), 25)
+        self.assertLessEqual(len(short_description.group(1)), 64)
+        default_prompt = re.search(r'(?m)^\s+default_prompt:\s+"([^"]+)"$', text)
+        self.assertIsNotNone(default_prompt)
+        self.assertTrue(default_prompt.group(1).startswith("$tao"))
+        self.assertIn("gpt-5.6-sol", default_prompt.group(1))
+        self.assertIn("gpt-5.6-luna", default_prompt.group(1))
+        self.assertRegex(text, r'(?m)^\s+allow_implicit_invocation:\s+false\s*$')
 
     def test_all_json_assets_and_schemas_parse(self) -> None:
         paths = [
@@ -93,6 +106,51 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("completed → ready", runtime)
         self.assertIn("history/assignment-", runtime)
         self.assertIn("Only PROJECT_LEAD", protocol)
+
+    def test_cost_first_dispatch_contract_is_hard(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
+        for text in (skill, protocol):
+            self.assertIn("MUST NOT", text)
+            self.assertIn("poll", text.lower())
+            self.assertIn("economy model", text.lower())
+        self.assertIn('model: "gpt-5.6-luna"', profile)
+        self.assertIn("MUST NOT be omitted", profile)
+        self.assertIn("MUST NOT spawn", profile)
+        self.assertIn("gpt-5.6-luna / High", profile)
+
+    def test_lead_delegates_mechanical_work(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        for text in (skill, protocol):
+            self.assertIn("ssh", text)
+            self.assertIn("nvidia-smi", text)
+            self.assertIn("must not", text)
+            self.assertIn("strong reasoning", text)
+
+    def test_readmes_document_model_fallback_and_event_handoff(self) -> None:
+        for name in ("README.md", "README.zh-CN.md"):
+            text = (ROOT / name).read_text(encoding="utf-8").lower()
+            with self.subTest(name=name):
+                self.assertIn("gpt-5.6-luna", text)
+                self.assertIn("status.json", text)
+                self.assertTrue("poll" in text or "轮询" in text)
+                self.assertIn("worker-1", text)
+
+    def test_readmes_show_automatic_and_manual_economy_flows(self) -> None:
+        english = (ROOT / "README.md").read_text(encoding="utf-8")
+        chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+        self.assertIn("explicit spawn of gpt-5.6-luna / High worker-1", english)
+        self.assertIn("Owner opens gpt-5.6-luna / High", english)
+        self.assertIn("silently inherits Sol", english)
+        self.assertIn("显式 spawn gpt-5.6-luna / High worker-1", chinese)
+        self.assertIn("Owner 打开 gpt-5.6-luna / High", chinese)
+        self.assertIn("继承 Sol", chinese)
 
     def test_legacy_invocation_name_is_absent(self) -> None:
         legacy = "$tiered-agent-" + "orchestrator"

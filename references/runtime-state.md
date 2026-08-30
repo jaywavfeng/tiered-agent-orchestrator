@@ -2,6 +2,8 @@
 
 Read this reference before creating or modifying `.tiered-agent` state.
 
+Runtime state records assignments and evidence; it does not select models or replace host-level model routing. Model selection is a hard dispatch concern described by the orchestration protocol and the active profile.
+
 ## Runtime layout
 
 ```text
@@ -48,6 +50,8 @@ Each WORKER owns:
 
 REVIEWER owns `review/STATUS.json` and `review/REPORT.md`.
 
+The Lead must keep mechanical execution out of its own turn. A Worker may perform searches, environment checks, commands, experiments, tests, routine fixes, remote operations, data processing, and result packaging within its declared scope.
+
 Workers must not update `STATE.json`. This single-writer rule prevents concurrent global-state conflicts. The Lead reconciles Worker status into global state when it returns.
 
 The only Lead write to current Worker-owned files is the `reassign-worker` transaction after that assignment is `completed`: it archives the old task, status, and blocker, writes the new task, clears the blocker, and resets status to `ready`. Workers cannot perform this transition themselves.
@@ -93,6 +97,12 @@ Valid Worker statuses are `ready`, `active`, `blocked`, `waiting-owner`, `comple
 `TASK.md`, `STATUS.json`, and `BLOCKER.md` describe the current assignment. Before reuse, `reassign-worker` copies the completed assignment into `history/assignment-NNNN/` and then writes the next assignment in place. This keeps the stable Worker path and conversation while preserving old objectives, scopes, results, verification, and blocker evidence without expanding `STATE.json`.
 
 The Worker always rereads current repository state when continued. Chat memory may help execution, but it never selects the active assignment or overrides the latest `TASK.md`.
+
+## Dispatch handoff
+
+When the host supports native subagents, a dispatch is valid only when the caller explicitly supplies the configured economy model and High reasoning and registers the subagent as a formal Worker. An omitted or unreliable model parameter is unsafe because it may inherit the Lead's strong model; in that case the Lead must stop and ask the Owner to create the Worker conversation manually. Native subagents remain subject to this state contract.
+
+After dispatch, no status polling loop is part of the runtime protocol. The Lead waits for a persisted completion, blocker, milestone, or Owner event. A manual Worker is resumed by returning to its original conversation with `$tao continue worker-N`.
 
 ## Owner feedback events
 

@@ -8,9 +8,9 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
 2. The Lead inspects the project, initializes `.tiered-agent`, writes the plan, and assigns `worker-1`.
 
-3. The Lead tells the Owner:
+3. If native dispatch can explicitly select a model, the Lead dispatches the formal Worker with `model: gpt-5.6-luna` and High reasoning. Otherwise the Lead stops and tells the Owner:
 
-   > Create one economy Worker conversation and send:
+   > Open `gpt-5.6-luna / High`, create one economy Worker conversation, and send:
    >
    > `$tao continue worker-1`
 
@@ -28,4 +28,4 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
    > `$tao status`
 
-The Owner never copies the previous conversation. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks, it records the evidence in its own blocker file and sends the Owner back to the same Lead conversation.
+The Owner never copies the previous conversation. After dispatch, the Lead does not poll `STATUS.json` or duplicate the assignment; it waits for an event or Owner return. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks, it records the evidence in its own blocker file and sends the Owner back to the same Lead conversation.

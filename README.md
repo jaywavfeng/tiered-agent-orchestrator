@@ -6,7 +6,7 @@
 
 One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.2.0 · Apache-2.0 · Benchmark pending
+> Project status: v0.3.0 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -26,6 +26,12 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 
 **You never need to copy the previous conversation.**
 
+### Cost-first execution
+
+TAO optimizes for correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. Sol is reserved for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. Luna Workers perform searches, environment checks, implementation, experiments, tests, debugging, data/video processing, remote operations, and result packaging. Total tokens may rise slightly when expensive-model usage and credits fall substantially.
+
+This routing is a hard constraint. When Codex native subagent dispatch supports an explicit model, the Lead must pass `gpt-5.6-luna` with High reasoning. If the host cannot reliably set the model, the Lead must not spawn: it stops and asks the Owner to open `gpt-5.6-luna / High` and send `$tao continue worker-1`. TAO must never create a Worker that silently inherits Sol to simulate low-cost delegation.
+
 ## What it does
 
 - Keeps one Project Lead conversation for the project lifecycle.
@@ -39,7 +45,7 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 - Adds deterministic, dependency-free state validation and management summaries.
 - Provides paired benchmark tooling without publishing invented savings claims.
 
-It does **not** automatically switch top-level models, create model-specific conversations, push Git, deploy production, or bypass the host's approval model.
+It does **not** automatically switch top-level models, create model-specific conversations when the host cannot guarantee an economy model, push Git, deploy production, or bypass the host's approval model.
 
 ## Quick start
 
@@ -69,7 +75,7 @@ Choose a strong model and describe the final goal naturally:
 $tao Build the import pipeline, migrate existing callers, and run the full integration suite.
 ```
 
-The Lead inspects the repository, creates `.tiered-agent` state, decides the architecture, and determines whether Worker delegation will actually save strong-model work.
+The Lead reads only enough of the repository to decide architecture, creates `.tiered-agent` state, and determines whether Worker delegation will reduce strong-model work. It must delegate routine mechanics to the economy Worker. After dispatch it yields for a completion, blocker, milestone, or Owner event; it does not poll `STATUS.json` or repeat checks.
 
 ### 3. Start the default Worker once, then reuse it
 
@@ -112,6 +118,41 @@ Only when a separate task is genuinely independent and parallel—or requires ma
 ```text
 $tao continue worker-2
 ```
+
+### Dispatch lifecycle
+
+Ideal native-dispatch mode:
+
+```text
+Owner
+  ↓
+Sol Project Lead
+  ↓
+explicit spawn of gpt-5.6-luna / High worker-1
+  ↓
+Sol stops and waits for an event
+  ↓
+Luna performs checks / implementation / training
+  ↓
+milestone event
+  ↓
+Sol reads the summary and chooses the next stage
+  ↓
+Lead reassigns the same worker-1
+```
+
+When explicit economy routing is unavailable:
+
+```text
+Sol Project Lead prepares worker-1
+  ↓
+Sol stops
+  ↓
+Owner opens gpt-5.6-luna / High and sends:
+$tao continue worker-1
+```
+
+TAO does not continuously poll or duplicate Worker work after dispatch.
 
 ## Commands
 

@@ -4,17 +4,19 @@ description: Orchestrate large, multi-stage, or long-running engineering work wi
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # Tiered Agent Orchestrator
 
-Use expensive intelligence only where expensive intelligence is needed:
+Use expensive intelligence only where expensive intelligence is needed. The optimization priority is correct completion first, then reducing strong-model/Sol usage, then reducing credits/cost, then reducing unnecessary context and model switches, and only then reducing total token count. A run is successful when strong-model usage falls while Sol remains focused on high-value decisions, even if Luna uses somewhat more tokens.
 
 - PROJECT_LEAD makes decisions and distills intent.
 - WORKER is a reusable, long-lived execution conversation that performs successive bounded assignments.
 - REVIEWER checks completed work when the expected quality gain justifies another model switch.
 - The repository carries operational state; chat history is never a handoff dependency.
+
+The model tier is a hard constraint. PROJECT_LEAD uses the configured strong model only for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. WORKER uses the configured economy model for nearly all execution. See the OpenAI profile for exact model and reasoning labels.
 
 ## Route the request
 
@@ -45,20 +47,29 @@ Read [the orchestration protocol](references/orchestration-protocol.md) and [run
 
 For a new project:
 
-1. Inspect repository instructions, code, and current validation state.
+1. Inspect only the repository entrypoints, instructions, and validation evidence needed for a decision. Do not broadly scan the repository.
 2. Resolve only uncertainties that materially change the goal or architecture.
 3. Initialize runtime state with `python scripts/statectl.py init --project-root <repo> --project-id <slug>`. If executing from an installed copy, use the absolute path to this skill's script.
 4. Write the distilled goal, current state, decisions, constraints, milestones, validation, and completion criteria to `PLAN.md`. Never record private chain-of-thought.
 5. Analyze the dependency graph. Default to one reusable Worker conversation for sequential milestones.
 6. Register the first Worker with `statectl.py add-worker`. Add another only when work is genuinely parallel, responsibilities or context differ materially, reuse would cause clear context pollution, or the existing Worker is inactive—and only when the benefit exceeds the extra conversation and token cost. Never add a Worker merely because the milestone changed.
-7. Update global state only at meaningful transitions.
+7. Before dispatch, apply the model-routing and host-capability rules below. Update global state only at meaningful transitions.
+
+### Hard model-routing and dispatch rules
+
+- If the host can natively spawn a TAO Worker with an explicit model, PROJECT_LEAD **MUST** pass the configured economy model and High reasoning. The `model` parameter **MUST NOT** be omitted, and the spawned agent **MUST** map to one formal `worker-N` assignment.
+- If the host cannot reliably set an economy model explicitly, PROJECT_LEAD **MUST NOT** spawn a Worker. Stop the turn and tell the Owner to create a top-level economy Worker manually using the profile's model/reasoning and `$tao continue worker-N`.
+- A native subagent is only a Worker runtime; it remains bound by `TASK.md`, scope, status, dependencies, ownership, and the single-writer protocol. The host's multi-agent capability never justifies fan-out.
+- After dispatching a Worker, **MUST NOT** continuously poll `STATUS.json`, repeatedly wait/check, duplicate the assignment, or perform the Worker's execution. Yield for a completion, blocker, milestone, or Owner event. For a manually opened Worker, end the Lead turn and wait for the Owner to return with `continue`.
+
+Before every action, ask whether it needs strong reasoning. If not, delegate it to the current Worker. PROJECT_LEAD **MUST NOT** perform routine repository scans, SSH/GPU/disk/environment checks (including `nvidia-smi`), dependency installation, training, tests, implementation, debugging, video/data processing, chart generation, deployment, or repeated shell commands. Only the smallest read-only check required for an architecture decision is allowed.
 
 For resynchronization:
 
-1. Read `STATE.json`, active Worker status files, pending Owner inbox events, relevant blockers, and `HANDOFF.md`.
+1. Read `STATE.json`, active Worker status summaries, pending Owner inbox events, relevant blockers, and `HANDOFF.md`.
 2. Inspect diffs or code only where status and evidence require it.
 3. Interpret new Owner intent and update `OWNER_DIRECTIVES.md` and `PLAN.md` when decisions changed. When a completed Worker is suitable for the next assignment, use the PROJECT_LEAD-only `statectl.py reassign-worker` command to archive its prior assignment, rewrite its task contract, and return it to `ready` instead of creating a new Worker ID.
-4. Report progress concisely. The Owner must not summarize Worker history.
+4. Report progress concisely. The Owner must not summarize Worker history. Do not poll for progress after dispatch; resume only on an event or Owner return.
 
 ## Worker workflow
 
