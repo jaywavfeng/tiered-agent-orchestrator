@@ -4,9 +4,9 @@
 
 **Use expensive models for decisions. Use cheaper models for execution. Keep project state across agent conversations.**
 
-One project. One long-lived manager. The right number of workers. Shared repository state.
+One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.1.1 · Apache-2.0 · Benchmark pending
+> Project status: v0.2.0 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -29,8 +29,10 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 ## What it does
 
 - Keeps one Project Lead conversation for the project lifecycle.
-- Defaults to one Worker and permits parallel Workers only for independent, disjoint work.
+- Defaults to one long-lived Worker conversation and reuses it across sequential milestones.
+- Adds another Worker only for genuine parallelism, distinct responsibilities or context, material context-isolation value, or an explicitly inactive Worker—and only when the benefit exceeds coordination and token cost.
 - Gives every Worker an objective, write scope, dependencies, exclusions, and completion criteria.
+- Archives completed assignments before reusing the stable Worker ID, so old task evidence is never silently overwritten.
 - Separates global Lead-owned state from Worker-owned status to avoid concurrent write conflicts.
 - Escalates decisions and ambiguous intent instead of turning the Owner into a message bus.
 - Loads context progressively so Workers do not pay to read the Lead's entire exploration.
@@ -69,7 +71,7 @@ $tao Build the import pipeline, migrate existing callers, and run the full integ
 
 The Lead inspects the repository, creates `.tiered-agent` state, decides the architecture, and determines whether Worker delegation will actually save strong-model work.
 
-### 3. Start only the Workers the Lead requests
+### 3. Start the default Worker once, then reuse it
 
 A typical instruction is:
 
@@ -78,12 +80,37 @@ Create one economy Worker conversation and send:
 $tao continue worker-1
 ```
 
-If three tasks are genuinely independent, the Lead may provide three separate continuation lines. If the tasks are coupled, it stays with one Worker.
+For the next sequential milestone, the Lead reassigns `worker-1` and the Owner returns to this same Worker conversation. A milestone boundary alone never creates `worker-2`.
 
 Work normally in the Worker conversation. Return to the original Project Lead conversation for a blocker, ambiguous direction change, architecture decision, or management status:
 
 ```text
 $tao status
+```
+
+### Reuse across milestones
+
+```text
+Lead:
+$tao Complete this project
+
+Worker conversation:
+$tao continue worker-1
+
+M1 complete
+↓
+Return to Lead: continue
+↓
+Lead reassigns M2 to worker-1
+↓
+Return to the same Worker conversation:
+$tao continue worker-1
+```
+
+Only when a separate task is genuinely independent and parallel—or requires materially different responsibility or isolated context—should the Lead ask the Owner to create another conversation:
+
+```text
+$tao continue worker-2
 ```
 
 ## Commands
@@ -110,7 +137,11 @@ Simple, local, low-risk edits are completed directly without creating orchestrat
 ├── workers/<worker-id>/
 │   ├── TASK.md
 │   ├── STATUS.json
-│   └── BLOCKER.md
+│   ├── BLOCKER.md
+│   └── history/assignment-<revision>/
+│       ├── TASK.md
+│       ├── STATUS.json
+│       └── BLOCKER.md
 └── review/
     ├── TASK.md
     ├── STATUS.json
@@ -119,15 +150,16 @@ Simple, local, low-risk edits are completed directly without creating orchestrat
 
 `STATE.json` is deliberately small and never stores chat transcripts, hidden reasoning, secrets, command logs, or model names. `PLAN.md` stores decisions rather than chain-of-thought. `HANDOFF.md` stores only the next role's essential facts.
 
-Global state, the plan, directives, and assignments have one writer: PROJECT_LEAD. Each Worker owns only its declared code scope, its status, blocker, and uniquely named Owner-feedback events.
+Global state, the plan, directives, assignments, and assignment archives have one writer: PROJECT_LEAD. Each Worker owns only its declared code scope, current status, blocker, and uniquely named Owner-feedback events. After completion, only the Lead's reassignment transaction may archive those files and reset the Worker to `ready`.
 
 ## State helper
 
-Python 3.9+ is the only runtime dependency. The helper uses the standard library and never overwrites initialized state.
+Python 3.9+ is the only runtime dependency. The helper uses the standard library. Initialization never overwrites existing state, and reassignment archives the completed task, status, and blocker before replacing the current assignment.
 
 ```console
 python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
 python scripts/statectl.py add-worker --project-root /path/to/project --worker-id worker-1 --objective "Implement the parser" --allowed-scope "src/parser/**" --completion-criterion "Parser tests pass"
+python scripts/statectl.py reassign-worker --project-root /path/to/project --worker-id worker-1 --milestone "M2" --objective "Integrate the parser" --allowed-scope "src/integration/**" --completion-criterion "Integration tests pass"
 python scripts/statectl.py validate --project-root /path/to/project
 python scripts/statectl.py status --project-root /path/to/project
 ```
@@ -172,7 +204,7 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-The test suite covers initialization without overwrite, schema and path safety, Worker registration and transitions, parallel write-scope conflicts, blocker recovery, review, verbatim Owner feedback, management status, all A–J behavior contracts, and benchmark aggregation.
+The test suite covers initialization without overwrite, schema and path safety, reusable Worker reassignment and immutable assignment history, parallel-Worker justification, write-scope conflicts, blocker recovery, review, verbatim Owner feedback, management status, all A–J behavior contracts, and benchmark aggregation.
 
 ## Compatibility and current limitations
 

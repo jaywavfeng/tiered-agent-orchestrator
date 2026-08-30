@@ -4,9 +4,9 @@
 
 **让昂贵模型负责决策，让低成本模型负责执行，让项目状态跨 Agent 对话持续存在。**
 
-一个项目。一个长期保留的经理。恰当数量的 Workers。共享的仓库状态。
+一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
 
-> 项目状态：v0.1.1 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.2.0 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -29,8 +29,10 @@ Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完�
 ## 它会做什么
 
 - 为整个项目保留一个固定 Project Lead 对话。
-- 默认只使用一个 Worker，仅在工作独立且写入范围互斥时并行。
+- 默认只使用一个长期 Worker 对话，并在连续 milestones 之间复用它。
+- 只有真正并行、职责或上下文明显不同、上下文隔离收益明确，或原 Worker 已明确停用时才增加 Worker，而且收益必须高于协调和 Token 成本。
 - 每个 Worker 都有目标、写入范围、依赖、禁止修改项和完成标准。
+- 复用稳定 Worker ID 前先归档已完成 assignment，旧任务证据不会被无记录覆盖。
 - 将 Lead 的全局状态与 Worker 自有状态分开，避免并发争写。
 - 升级的是决策和模糊意图，而不是让 Owner 人工搬运消息。
 - 按角色渐进加载上下文，Worker 不读取 Lead 的全部探索过程。
@@ -69,7 +71,7 @@ $tao 构建导入流水线、迁移现有调用方，并跑通完整集成测试
 
 Lead 会检查仓库、创建 `.tiered-agent` 状态、决定架构，并判断委派是否真的能减少强模型工作量。
 
-### 3. 只创建 Lead 要求的 Workers
+### 3. 只创建一次默认 Worker，之后持续复用
 
 典型提示是：
 
@@ -78,12 +80,37 @@ Lead 会检查仓库、创建 `.tiered-agent` 状态、决定架构，并判断�
 $tao continue worker-1
 ```
 
-如果存在三个真正独立的任务，Lead 会给出三行分别对应 Worker 的命令；如果工作强耦合，就只使用一个 Worker。
+进入下一个串行 milestone 时，Lead 会把新任务重新分配给 `worker-1`，Owner 回到原 Worker 对话即可。仅仅切换 milestone 绝不会创建 `worker-2`。
 
 平时在 Worker 对话中工作。遇到 blocker、模糊方向变化、架构决策或想看总进度时，回到最初的 Project Lead 对话：
 
 ```text
 $tao status
+```
+
+### 跨 milestone 复用
+
+```text
+Lead:
+$tao 完成这个项目
+
+Worker conversation:
+$tao continue worker-1
+
+M1 完成
+↓
+回到 Lead：继续
+↓
+Lead 将 M2 重新分配给 worker-1
+↓
+回到原 Worker 对话：
+$tao continue worker-1
+```
+
+只有另一项工作真正独立并可并行，或需要明显不同的职责和隔离上下文时，Lead 才应提示 Owner 创建新对话：
+
+```text
+$tao continue worker-2
 ```
 
 ## 命令
@@ -110,7 +137,11 @@ $tao status
 ├── workers/<worker-id>/
 │   ├── TASK.md
 │   ├── STATUS.json
-│   └── BLOCKER.md
+│   ├── BLOCKER.md
+│   └── history/assignment-<revision>/
+│       ├── TASK.md
+│       ├── STATUS.json
+│       └── BLOCKER.md
 └── review/
     ├── TASK.md
     ├── STATUS.json
@@ -119,15 +150,16 @@ $tao status
 
 `STATE.json` 保持很小，不保存聊天记录、隐藏推理、secret、终端历史或具体模型名。`PLAN.md` 保存正式决策而不是思维过程，`HANDOFF.md` 只保存下一角色必须知道的内容。
 
-全局状态、计划、正式 Owner 指令和任务分配只有一个写入者：PROJECT_LEAD。每个 Worker 只能写自己的代码范围、状态、blocker 和唯一命名的 Owner 反馈事件。
+全局状态、计划、正式 Owner 指令、任务分配和 assignment 归档只有一个写入者：PROJECT_LEAD。每个 Worker 只能写自己的代码范围、当前状态、blocker 和唯一命名的 Owner 反馈事件。任务完成后，只有 Lead 的 reassignment 事务可以归档这些文件并把 Worker 重置为 `ready`。
 
 ## 状态辅助工具
 
-Python 3.9+ 是唯一运行依赖。工具只使用标准库，并且不会覆盖已经初始化的状态。
+Python 3.9+ 是唯一运行依赖，工具只使用标准库。初始化不会覆盖已有状态；reassignment 会先归档已完成的任务、状态和 blocker，再替换当前 assignment。
 
 ```console
 python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
 python scripts/statectl.py add-worker --project-root /path/to/project --worker-id worker-1 --objective "Implement the parser" --allowed-scope "src/parser/**" --completion-criterion "Parser tests pass"
+python scripts/statectl.py reassign-worker --project-root /path/to/project --worker-id worker-1 --milestone "M2" --objective "Integrate the parser" --allowed-scope "src/integration/**" --completion-criterion "Integration tests pass"
 python scripts/statectl.py validate --project-root /path/to/project
 python scripts/statectl.py status --project-root /path/to/project
 ```
@@ -172,7 +204,7 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-测试覆盖不覆盖式初始化、schema 与路径安全、Worker 注册和转换、并行写域冲突、blocker 恢复、Review、Owner 原话保存、管理汇总、A–J 全部行为契约和 benchmark 聚合。
+测试覆盖不覆盖式初始化、schema 与路径安全、Worker 安全 reassignment 与不可丢失的 assignment 历史、新增并行 Worker 的收益说明、写域冲突、blocker 恢复、Review、Owner 原话保存、管理汇总、A–J 全部行为契约和 benchmark 聚合。
 
 ## 兼容性与当前限制
 

@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.1.1"', frontmatter)
+        self.assertIn('version: "0.2.0"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -65,8 +65,10 @@ class SkillContractTests(unittest.TestCase):
         chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         shared = [
             "$tao continue worker-1",
+            "$tao continue worker-2",
             "$tao status",
             "python scripts/statectl.py",
+            "reassign-worker",
             "Benchmark pending",
             "Apache-2.0",
         ]
@@ -77,6 +79,20 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("你不需要复制任何上一段聊天内容。", chinese)
         self.assertIn("README.zh-CN.md", english)
         self.assertIn("README.md", chinese)
+
+    def test_worker_identity_is_reusable_across_assignments(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        runtime = (ROOT / "references" / "runtime-state.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("long-lived role and conversation, not a single task", skill)
+        self.assertIn("Completing M1 does not justify creating `worker-2`", protocol)
+        self.assertIn("completed → ready", runtime)
+        self.assertIn("history/assignment-", runtime)
+        self.assertIn("Only PROJECT_LEAD", protocol)
 
     def test_legacy_invocation_name_is_absent(self) -> None:
         legacy = "$tiered-agent-" + "orchestrator"

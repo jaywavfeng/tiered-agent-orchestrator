@@ -16,7 +16,7 @@ The Lead is event-driven. It does not supervise every implementation step.
 
 ### WORKER
 
-A Worker executes a clear assignment over a declared write scope. It may implement, run commands, test, debug within the plan, and accept unambiguous local corrections. It must not invent intent, rewrite architecture, or expand its authority.
+A Worker is a long-lived execution role and conversation, not a disposable task ID. It executes one clear assignment at a time over a declared write scope, and the Lead may reuse it for later milestones. It may implement, run commands, test, debug within the plan, and accept unambiguous local corrections. It must not invent intent, rewrite architecture, or expand its authority.
 
 ### REVIEWER
 
@@ -34,23 +34,37 @@ Apply instructions in this order:
 
 Never use an older plan to override a newer Owner decision.
 
-## Parallelization gate
+## Worker reuse and parallelization gate
 
-Use one Worker by default. Add another only when every condition is satisfied:
+Use one long-lived Worker by default and reuse its existing conversation across sequential milestones. Completing M1 does not justify creating `worker-2`; reassign M2 to `worker-1` when it remains suitable.
 
-- its task is ready now rather than waiting on another Worker;
-- its write scope is disjoint from every active Worker;
-- its read dependencies are named;
-- it has observable, independent completion criteria;
-- integration is simple and the time saved exceeds coordination cost.
+Add another Worker only when at least one of these conditions is real:
 
-One to three Workers is the normal range. More than three requires an explicit coordination justification in the assignment. If Workers would frequently edit the same core files, serialize the work.
+- independent tasks are ready for genuine parallel execution;
+- tasks need materially different responsibilities or context;
+- reusing the existing Worker would create material context pollution;
+- the existing Worker has been explicitly made `inactive`.
+
+In every case, the expected benefit must clearly exceed the additional conversation, coordination, and token cost. The new assignment must also have disjoint active write scope, named read dependencies, observable independent completion criteria, and simple integration. `statectl.py add-worker` requires a coordination justification after the first Worker.
+
+One to three Workers is the normal range. More than three requires unusually strong coordination value. If Workers would frequently edit the same core files or wait on one dependency chain, serialize the assignments through the existing Worker.
+
+## Reassignment lifecycle
+
+When a Worker completes an assignment and remains suitable for the next one, PROJECT_LEAD:
+
+1. confirms the current status is `completed`;
+2. uses `statectl.py reassign-worker` with the new milestone, objective, scope, dependencies, plan references, exclusions, and completion criteria;
+3. lets the command archive the old `TASK.md`, `STATUS.json`, and `BLOCKER.md` under the Worker's assignment history;
+4. returns the same Worker to `ready` and tells the Owner to continue the original conversation with `$tao continue worker-N`.
+
+Only PROJECT_LEAD may perform this transaction because it writes Lead-owned assignment and global state and resets the Worker status. A Worker must not use `set-worker-status` to move itself directly from `completed` to `ready`. An `inactive` Worker stays inactive; create or select another Worker only when the new-Worker gate is satisfied.
 
 ## Assignment contract
 
 Every Worker task must state:
 
-- `worker_id` and objective;
+- stable `worker_id`, assignment revision, and objective;
 - `allowed_scope`;
 - `read_dependencies`;
 - `do_not_modify`;
@@ -87,6 +101,8 @@ Use these phases:
 - `execution`: one or more Workers are active.
 - `review`: implementation is complete and a justified review is active.
 - `complete`: completion criteria and required validation are satisfied.
+
+Worker assignment completion is not project completion. A Worker may move through `ready → active → completed` multiple times as the Lead archives and reassigns successive assignments. Project `complete` is reserved for the final project goal.
 
 Use these project statuses:
 

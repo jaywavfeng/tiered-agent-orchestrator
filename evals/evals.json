@@ -28,16 +28,18 @@
       "assertions": [
         "Three Workers are assigned separate write scopes.",
         "Each task has independent completion criteria.",
-        "The Owner receives one continuation line per Worker."
+        "The Owner receives one continuation line per Worker.",
+        "The additional conversation and token cost is explicitly justified by real parallel value."
       ]
     },
     {
       "id": "D",
       "prompt": "Migrate the storage layer, then update every service to the new interface, then rewrite integration tests. The service changes cannot compile until the storage migration is complete.",
-      "expected_output": "The Project Lead rejects cosmetic parallelism and starts with one Worker or serialized assignments because the dependency chain is strong.",
+      "expected_output": "The Project Lead rejects cosmetic parallelism and reuses one long-lived Worker for the serialized assignments because the dependency chain is strong.",
       "assertions": [
         "The plan identifies the dependency ordering.",
-        "Concurrent Workers are not assigned overlapping or blocked work."
+        "Concurrent Workers are not assigned overlapping or blocked work.",
+        "A milestone boundary does not create a new Worker ID."
       ]
     },
     {

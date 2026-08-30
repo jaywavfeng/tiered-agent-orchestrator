@@ -34,6 +34,8 @@ REVIEW_LEVELS = {"none", "balanced", "strong"}
 PROJECT_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 WORKER_ID_RE = re.compile(r"^worker-[1-9][0-9]*$")
 REVIEWER_ID_RE = re.compile(r"^reviewer-[1-9][0-9]*$")
+ASSIGNMENT_HISTORY_RE = re.compile(r"^assignment-([0-9]{4,})$")
+ACTIVE_WORKER_STATUSES = {"ready", "active", "blocked", "waiting-owner"}
 
 
 class StateError(RuntimeError):
@@ -224,6 +226,48 @@ def validate_review_status(value: dict[str, Any], path: Path) -> list[str]:
     return errors
 
 
+def validate_assignment_history(worker_dir: Path, worker_id: str) -> list[str]:
+    history_dir = worker_dir / "history"
+    if not history_dir.exists():
+        return []
+    if not history_dir.is_dir():
+        return [f"{history_dir}: assignment history must be a directory"]
+
+    errors: list[str] = []
+    seen_revisions: set[int] = set()
+    for assignment_dir in sorted(history_dir.iterdir()):
+        match = ASSIGNMENT_HISTORY_RE.fullmatch(assignment_dir.name)
+        if not assignment_dir.is_dir() or match is None:
+            errors.append(f"{assignment_dir}: invalid assignment history entry")
+            continue
+        revision = int(match.group(1))
+        if revision < 1:
+            errors.append(f"{assignment_dir}: assignment revision must be positive")
+            continue
+        if revision in seen_revisions:
+            errors.append(f"{assignment_dir}: duplicate assignment revision {revision}")
+            continue
+        seen_revisions.add(revision)
+        for name in ("TASK.md", "STATUS.json", "BLOCKER.md"):
+            if not (assignment_dir / name).is_file():
+                errors.append(f"{assignment_dir}: missing archived {name}")
+        archived_status_path = assignment_dir / "STATUS.json"
+        if archived_status_path.is_file():
+            try:
+                archived_status = read_json(archived_status_path)
+            except StateError as exc:
+                errors.append(str(exc))
+                continue
+            errors.extend(
+                validate_status_object(archived_status, worker_id, archived_status_path)
+            )
+            if archived_status.get("status") != "completed":
+                errors.append(
+                    f"{archived_status_path}: archived assignment must be completed"
+                )
+    return errors
+
+
 def validate_runtime(runtime: Path) -> list[str]:
     errors: list[str] = []
     for name in ("STATE.json", "PLAN.md", "OWNER_DIRECTIVES.md", "HANDOFF.md"):
@@ -317,6 +361,11 @@ def validate_runtime(runtime: Path) -> list[str]:
             continue
         if not task.is_file():
             errors.append(f"{prefix}: task file does not exist: {task}")
+        worker_dir = task.parent
+        blocker_file = worker_dir / "BLOCKER.md"
+        if not blocker_file.is_file():
+            errors.append(f"{prefix}: blocker file does not exist: {blocker_file}")
+        errors.extend(validate_assignment_history(worker_dir, worker_id))
         if not status_file.is_file():
             errors.append(f"{prefix}: status file does not exist: {status_file}")
             continue
@@ -346,7 +395,7 @@ def validate_runtime(runtime: Path) -> list[str]:
                         f"Active Worker {worker_id} has incomplete dependency "
                         f"{dependency} ({dependency_status})"
                     )
-        if status_value.get("status") in {"ready", "active", "blocked", "waiting-owner"}:
+        if status_value.get("status") in ACTIVE_WORKER_STATUSES:
             for scope in worker.get("write_scope", []):
                 if scope in active_scopes:
                     errors.append(
@@ -482,10 +531,38 @@ def markdown_list(values: Iterable[str]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- None"
 
 
-def build_worker_task(args: argparse.Namespace) -> str:
+def normalize_worker_assignment(args: argparse.Namespace) -> tuple[str, list[str]]:
+    objective = require_nonempty(args.objective, "objective")
+    args.objective = objective
+    args.allowed_scope = [
+        require_nonempty(item, "allowed-scope") for item in args.allowed_scope
+    ]
+    args.read_dependency = [
+        require_nonempty(item, "read-dependency") for item in args.read_dependency
+    ]
+    args.do_not_modify = [
+        require_nonempty(item, "do-not-modify") for item in args.do_not_modify
+    ]
+    args.depends_on = [require_nonempty(item, "depends-on") for item in args.depends_on]
+    args.plan_section = [
+        require_nonempty(item, "plan-section") for item in args.plan_section
+    ]
+    args.completion_criterion = [
+        require_nonempty(item, "completion-criterion")
+        for item in args.completion_criterion
+    ]
+    if getattr(args, "coordination_justification", None) is not None:
+        args.coordination_justification = require_nonempty(
+            args.coordination_justification, "coordination-justification"
+        )
+    return objective, args.allowed_scope
+
+
+def build_worker_task(args: argparse.Namespace, assignment_revision: int = 1) -> str:
     coordination = args.coordination_justification or "Not required."
     return (
         f"# Worker Task: {args.worker_id}\n\n"
+        f"## Assignment revision\n\n{assignment_revision}\n\n"
         f"## Objective\n\n{args.objective.strip()}\n\n"
         f"## Allowed scope\n\n{markdown_list(args.allowed_scope)}\n\n"
         f"## Read dependencies\n\n{markdown_list(args.read_dependency)}\n\n"
@@ -503,11 +580,7 @@ def command_add_worker(args: argparse.Namespace) -> int:
     assert_valid(runtime)
     if not WORKER_ID_RE.fullmatch(args.worker_id):
         raise StateError("worker-id must match worker-N with N greater than zero")
-    objective = require_nonempty(args.objective, "objective")
-    scopes = [require_nonempty(item, "allowed-scope") for item in args.allowed_scope]
-    criteria = [
-        require_nonempty(item, "completion-criterion") for item in args.completion_criterion
-    ]
+    _, scopes = normalize_worker_assignment(args)
     state = load_state(runtime)
     registry = state["workers"]
     if state["status"] == "complete":
@@ -518,16 +591,24 @@ def command_add_worker(args: argparse.Namespace) -> int:
     unknown = sorted(set(args.depends_on) - known_ids)
     if unknown:
         raise StateError(f"Unknown Worker dependencies: {', '.join(unknown)}")
-    if len(registry) >= 3 and not (args.coordination_justification or "").strip():
-        raise StateError("More than three Workers requires --coordination-justification")
     for item in registry:
+        status_file = checked_relative_path(
+            runtime, item["status_path"], f"{item['id']}.status_path"
+        )
+        if read_json(status_file)["status"] not in ACTIVE_WORKER_STATUSES:
+            continue
         overlap = sorted(set(scopes) & set(item["write_scope"]))
         if overlap:
             raise StateError(
                 f"Write scope overlaps with {item['id']}: {', '.join(overlap)}"
             )
 
-    args.objective = objective
+    if registry and not args.coordination_justification:
+        raise StateError(
+            "An additional Worker requires --coordination-justification; "
+            "reuse an existing completed Worker unless a new conversation has clear value"
+        )
+
     worker_dir = runtime / "workers" / args.worker_id
     if worker_dir.exists():
         raise StateError(f"Refusing to overwrite existing Worker directory: {worker_dir}")
@@ -564,13 +645,147 @@ def command_add_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def archived_assignment_revisions(worker_dir: Path) -> list[int]:
+    history_dir = worker_dir / "history"
+    if not history_dir.is_dir():
+        return []
+    revisions: list[int] = []
+    for path in history_dir.iterdir():
+        match = ASSIGNMENT_HISTORY_RE.fullmatch(path.name)
+        if path.is_dir() and match is not None:
+            revisions.append(int(match.group(1)))
+    return revisions
+
+
+def archive_worker_assignment(worker_dir: Path) -> int:
+    history_dir = worker_dir / "history"
+    history_dir.mkdir(exist_ok=True)
+    revision = max(archived_assignment_revisions(worker_dir), default=0) + 1
+    destination = history_dir / f"assignment-{revision:04d}"
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".assignment-{revision:04d}-", dir=history_dir)
+    )
+    try:
+        for name in ("TASK.md", "STATUS.json", "BLOCKER.md"):
+            write_new_text(temporary / name, (worker_dir / name).read_text(encoding="utf-8"))
+        os.replace(temporary, destination)
+    except Exception:
+        if temporary.exists():
+            for child in temporary.iterdir():
+                child.unlink()
+            temporary.rmdir()
+        raise
+    return revision
+
+
+def command_reassign_worker(args: argparse.Namespace) -> int:
+    root = project_root(args.project_root)
+    runtime = runtime_dir(root)
+    assert_valid(runtime)
+    if not WORKER_ID_RE.fullmatch(args.worker_id):
+        raise StateError("worker-id must match worker-N with N greater than zero")
+    state = load_state(runtime)
+    if state["status"] == "complete":
+        raise StateError("Cannot reassign a Worker in a completed project")
+    registry = {item["id"]: item for item in state["workers"]}
+    if args.worker_id not in registry:
+        raise StateError(f"Unknown Worker: {args.worker_id}")
+
+    entry = registry[args.worker_id]
+    worker_dir = checked_relative_path(
+        runtime, entry["task_path"], "worker.task_path"
+    ).parent
+    status_path_value = checked_relative_path(
+        runtime, entry["status_path"], "worker.status_path"
+    )
+    old_status = read_json(status_path_value)
+    if old_status["status"] != "completed":
+        raise StateError(
+            f"Cannot reassign {args.worker_id}; current assignment is "
+            f"{old_status['status']}, not completed"
+        )
+
+    _, scopes = normalize_worker_assignment(args)
+    known_ids = set(registry)
+    unknown = sorted(set(args.depends_on) - known_ids)
+    if unknown:
+        raise StateError(f"Unknown Worker dependencies: {', '.join(unknown)}")
+    if args.worker_id in args.depends_on:
+        raise StateError(f"{args.worker_id} cannot depend on itself")
+
+    def dependency_reaches(start: str, target: str, seen: set[str]) -> bool:
+        if start in seen:
+            return False
+        seen.add(start)
+        for dependency in registry[start]["depends_on"]:
+            if dependency == target or dependency_reaches(dependency, target, seen):
+                return True
+        return False
+
+    for dependency in args.depends_on:
+        if dependency_reaches(dependency, args.worker_id, set()):
+            raise StateError(
+                f"Reassigning {args.worker_id} would create a Worker dependency cycle"
+            )
+    for other_id, other in registry.items():
+        if other_id == args.worker_id:
+            continue
+        other_status_path = checked_relative_path(
+            runtime, other["status_path"], f"{other_id}.status_path"
+        )
+        other_status = read_json(other_status_path)["status"]
+        if other_status == "active" and args.worker_id in other["depends_on"]:
+            raise StateError(
+                f"Cannot reassign {args.worker_id}; active dependent {other_id} "
+                "still requires its completed assignment"
+            )
+        if other_status not in ACTIVE_WORKER_STATUSES:
+            continue
+        overlap = sorted(set(scopes) & set(other["write_scope"]))
+        if overlap:
+            raise StateError(
+                f"Write scope overlaps with {other_id}: {', '.join(overlap)}"
+            )
+
+    archived_revision = archive_worker_assignment(worker_dir)
+    new_revision = archived_revision + 1
+    atomic_write_text(worker_dir / "TASK.md", build_worker_task(args, new_revision))
+    atomic_write_text(worker_dir / "BLOCKER.md", read_template_text("blocker.md"))
+    new_status = read_template_json("worker-status.json")
+    new_status.update(
+        {
+            "worker_id": args.worker_id,
+            "summary": f"Assignment revision {new_revision} is ready.",
+            "last_updated": utc_now(),
+        }
+    )
+    atomic_write_json(status_path_value, new_status)
+
+    entry["write_scope"] = scopes
+    entry["depends_on"] = list(args.depends_on)
+    state["phase"] = "execution"
+    state["status"] = "active"
+    state["current_milestone"] = require_nonempty(args.milestone, "milestone")
+    state["next_action"] = {
+        "actor": args.worker_id,
+        "instruction": f"Continue {args.worker_id} with assignment revision {new_revision}.",
+    }
+    save_state(runtime, state)
+    assert_valid(runtime)
+    print(
+        f"PROJECT_LEAD reassigned {args.worker_id}: completed -> ready "
+        f"(assignment {new_revision}; archived assignment {archived_revision})"
+    )
+    return 0
+
+
 WORKER_TRANSITIONS = {
     "ready": {"active", "blocked", "waiting-owner", "completed", "inactive"},
     "active": {"blocked", "waiting-owner", "completed", "inactive"},
     "blocked": {"active", "waiting-owner", "inactive"},
     "waiting-owner": {"active", "blocked", "inactive"},
     "completed": {"inactive"},
-    "inactive": {"ready", "active"},
+    "inactive": set(),
 }
 
 
@@ -898,6 +1113,25 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--completion-criterion", action="append", required=True)
     add_parser.add_argument("--coordination-justification")
     add_parser.set_defaults(func=command_add_worker)
+
+    reassign_parser = subparsers.add_parser(
+        "reassign-worker",
+        help="PROJECT_LEAD only: archive and reassign a completed Worker",
+    )
+    common_project_root(reassign_parser)
+    reassign_parser.add_argument("--worker-id", required=True)
+    reassign_parser.add_argument("--milestone", required=True)
+    reassign_parser.add_argument("--objective", required=True)
+    reassign_parser.add_argument("--allowed-scope", action="append", required=True)
+    reassign_parser.add_argument("--read-dependency", action="append", default=[])
+    reassign_parser.add_argument("--do-not-modify", action="append", default=[])
+    reassign_parser.add_argument("--depends-on", action="append", default=[])
+    reassign_parser.add_argument("--plan-section", action="append", default=[])
+    reassign_parser.add_argument("--completion-criterion", action="append", required=True)
+    reassign_parser.set_defaults(
+        func=command_reassign_worker,
+        coordination_justification="Existing Worker reused; no new conversation required.",
+    )
 
     worker_parser = subparsers.add_parser("set-worker-status", help="Update one Worker's owned status")
     common_project_root(worker_parser)

@@ -133,7 +133,12 @@ class ForwardScenarioTests(unittest.TestCase):
         runtime = self.init()
         self.add_worker("worker-1", "src/core/**")
         self.add_worker(
-            "worker-2", "src/adapter/**", "--depends-on", "worker-1"
+            "worker-2",
+            "src/adapter/**",
+            "--depends-on",
+            "worker-1",
+            "--coordination-justification",
+            "The adapter has a distinct context and can start after the core handoff.",
         )
         blocked = self.run_cli(
             "set-worker-status",

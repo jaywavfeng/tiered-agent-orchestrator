@@ -57,6 +57,29 @@ class StateCtlTests(unittest.TestCase):
             *extra,
         )
 
+    def reassign_worker(
+        self,
+        worker_id: str = "worker-1",
+        scope: str = "src/m2/**",
+        *extra: str,
+    ) -> tuple[int, str, str]:
+        return self.run_cli(
+            "reassign-worker",
+            "--worker-id",
+            worker_id,
+            "--milestone",
+            "M2",
+            "--objective",
+            "Complete the M2 assignment.",
+            "--allowed-scope",
+            scope,
+            "--read-dependency",
+            "src/m1/**",
+            "--completion-criterion",
+            "M2 tests pass.",
+            *extra,
+        )
+
     def test_init_is_idempotent_and_does_not_overwrite(self) -> None:
         runtime = self.init()
         before = (runtime / "STATE.json").read_bytes()
@@ -188,8 +211,16 @@ class StateCtlTests(unittest.TestCase):
     def test_more_than_three_workers_requires_justification(self) -> None:
         self.init()
         for number in range(1, 4):
+            extra = (
+                ()
+                if number == 1
+                else (
+                    "--coordination-justification",
+                    f"module-{number} is an independent parallel adapter.",
+                )
+            )
             result, _, error = self.add_worker(
-                f"worker-{number}", f"module-{number}/**"
+                f"worker-{number}", f"module-{number}/**", *extra
             )
             self.assertEqual(result, 0, error)
         result, _, error = self.add_worker("worker-4", "module-4/**")
@@ -209,6 +240,162 @@ class StateCtlTests(unittest.TestCase):
         result, _, error = self.add_worker("worker-2", "src/**")
         self.assertEqual(result, 2)
         self.assertIn("Write scope overlaps", error)
+
+    def test_milestone_change_does_not_register_a_new_worker(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-project",
+                "--phase",
+                "execution",
+                "--status",
+                "active",
+                "--milestone",
+                "M2",
+            )[0],
+            0,
+        )
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertEqual([item["id"] for item in state["workers"]], ["worker-1"])
+
+    def test_completed_worker_reassignment_archives_history_and_continues(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker(scope="src/m1/**")[0], 0)
+        early_result, _, early_error = self.reassign_worker()
+        self.assertEqual(early_result, 2)
+        self.assertIn("not completed", early_error)
+        self.assertFalse((runtime / "workers" / "worker-1" / "history").exists())
+        blocker = runtime / "workers" / "worker-1" / "BLOCKER.md"
+        blocker.write_text("# Blocker\n\nResolved M1 evidence.\n", encoding="utf-8")
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "M1 completed.",
+                "--files-changed",
+                "src/m1/result.py",
+                "--verification",
+                "M1 tests passed.",
+            )[0],
+            0,
+        )
+        old_task = (runtime / "workers" / "worker-1" / "TASK.md").read_text(
+            encoding="utf-8"
+        )
+        direct_result, _, direct_error = self.run_cli(
+            "set-worker-status",
+            "--worker-id",
+            "worker-1",
+            "--status",
+            "ready",
+            "--summary",
+            "Unsafe direct restart.",
+        )
+        self.assertEqual(direct_result, 2)
+        self.assertIn("Invalid Worker transition", direct_error)
+
+        result, output, error = self.reassign_worker()
+        self.assertEqual(result, 0, error)
+        self.assertIn("completed -> ready", output)
+        worker_dir = runtime / "workers" / "worker-1"
+        history = worker_dir / "history" / "assignment-0001"
+        self.assertEqual((history / "TASK.md").read_text(encoding="utf-8"), old_task)
+        self.assertEqual(
+            json.loads((history / "STATUS.json").read_text(encoding="utf-8"))["status"],
+            "completed",
+        )
+        self.assertIn(
+            "Resolved M1 evidence.",
+            (history / "BLOCKER.md").read_text(encoding="utf-8"),
+        )
+        new_task = (worker_dir / "TASK.md").read_text(encoding="utf-8")
+        self.assertIn("## Assignment revision\n\n2", new_task)
+        self.assertIn("Complete the M2 assignment.", new_task)
+        status = json.loads((worker_dir / "STATUS.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["status"], "ready")
+        self.assertEqual(status["files_changed"], [])
+
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(state["workers"]), 1)
+        self.assertEqual(state["workers"][0]["id"], "worker-1")
+        self.assertEqual(state["workers"][0]["write_scope"], ["src/m2/**"])
+        self.assertEqual(state["current_milestone"], "M2")
+        self.assertEqual(state["next_action"]["actor"], "worker-1")
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "active",
+                "--summary",
+                "M2 execution resumed in the same Worker conversation.",
+            )[0],
+            0,
+        )
+        self.assertEqual(self.run_cli("validate")[0], 0)
+
+    def test_additional_parallel_worker_requires_justification(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker("worker-1", "src/core/**")[0], 0)
+        result, _, error = self.add_worker("worker-2", "src/adapter/**")
+        self.assertEqual(result, 2)
+        self.assertIn("additional Worker requires --coordination-justification", error)
+        result, _, error = self.add_worker(
+            "worker-2",
+            "src/adapter/**",
+            "--coordination-justification",
+            "The adapter is independently testable and ready in parallel.",
+        )
+        self.assertEqual(result, 0, error)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-2",
+                "--status",
+                "active",
+                "--summary",
+                "Independent adapter work started in parallel.",
+            )[0],
+            0,
+        )
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertEqual([item["id"] for item in state["workers"]], ["worker-1", "worker-2"])
+
+    def test_reassignment_preserves_active_write_scope_ownership(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker("worker-1", "src/m1/**")[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "M1 completed.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.add_worker(
+                "worker-2",
+                "src/shared/**",
+                "--coordination-justification",
+                "A separate active responsibility needs isolated context.",
+            )[0],
+            0,
+        )
+        result, _, error = self.reassign_worker("worker-1", "src/shared/**")
+        self.assertEqual(result, 2)
+        self.assertIn("Write scope overlaps with worker-2", error)
+        self.assertFalse((runtime / "workers" / "worker-1" / "history").exists())
 
     def test_owner_feedback_is_verbatim_and_unique(self) -> None:
         runtime = self.init()
