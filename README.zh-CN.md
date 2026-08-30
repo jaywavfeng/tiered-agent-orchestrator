@@ -6,7 +6,7 @@
 
 一个项目。一个长期保留的经理。恰当数量的 Workers。共享的仓库状态。
 
-> 项目状态：v0.1.0 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.1.1 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -57,12 +57,14 @@ $HOME/.agents/skills/tiered-agent-orchestrator
 
 其他兼容 Agent Skills 的 Coding Agent 可以把同一个目录安装到它支持的 Skill 位置。可移植接口是根目录 `SKILL.md`；`agents/openai.yaml` 只是可选的 OpenAI 专用元数据。
 
+该 Skill 仅支持显式调用，不会因普通自然语言自动触发。请用 `$tao` 开始编排请求。
+
 ### 2. 打开 Project Lead
 
 选择 strong 模型，然后直接用自然语言描述最终目标：
 
 ```text
-$tiered-agent-orchestrator 构建导入流水线、迁移现有调用方，并跑通完整集成测试。
+$tao 构建导入流水线、迁移现有调用方，并跑通完整集成测试。
 ```
 
 Lead 会检查仓库、创建 `.tiered-agent` 状态、决定架构，并判断委派是否真的能减少强模型工作量。
@@ -73,7 +75,7 @@ Lead 会检查仓库、创建 `.tiered-agent` 状态、决定架构，并判断�
 
 ```text
 创建一个 economy Worker 对话，并发送：
-$tiered-agent-orchestrator continue worker-1
+$tao continue worker-1
 ```
 
 如果存在三个真正独立的任务，Lead 会给出三行分别对应 Worker 的命令；如果工作强耦合，就只使用一个 Worker。
@@ -81,18 +83,18 @@ $tiered-agent-orchestrator continue worker-1
 平时在 Worker 对话中工作。遇到 blocker、模糊方向变化、架构决策或想看总进度时，回到最初的 Project Lead 对话：
 
 ```text
-$tiered-agent-orchestrator status
+$tao status
 ```
 
 ## 命令
 
 | 调用 | 行为 |
 |---|---|
-| `$tiered-agent-orchestrator <目标>` | 先做复杂度门控，只为合适的工作初始化 Project Lead |
-| `$tiered-agent-orchestrator continue worker-1` | 仅凭仓库状态继续一个明确 Worker |
-| `$tiered-agent-orchestrator continue reviewer-1` | 继续 Lead 明确创建的 Review |
-| `$tiered-agent-orchestrator status` | 汇总 Workers、Review、blockers、风险和下一角色 |
-| `$tiered-agent-orchestrator continue lead` | 让原 Project Lead 与最新仓库状态重新同步 |
+| `$tao <目标>` | 先做复杂度门控，只为合适的工作初始化 Project Lead |
+| `$tao continue worker-1` | 仅凭仓库状态继续一个明确 Worker |
+| `$tao continue reviewer-1` | 继续 Lead 明确创建的 Review |
+| `$tao status` | 汇总 Workers、Review、blockers、风险和下一角色 |
+| `$tao continue lead` | 让原 Project Lead 与最新仓库状态重新同步 |
 
 简单、局部、低风险任务由当前 Agent 直接完成，不创建完整组织状态。
 

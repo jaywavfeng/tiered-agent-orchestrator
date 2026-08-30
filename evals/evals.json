@@ -1,5 +1,5 @@
 {
-  "skill_name": "tiered-agent-orchestrator",
+  "skill_name": "tao",
   "evals": [
     {
       "id": "A",

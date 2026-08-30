@@ -1,10 +1,10 @@
 ---
-name: tiered-agent-orchestrator
+name: tao
 description: Orchestrate large, multi-stage, or long-running engineering work with a persistent strong Project Lead, economy Workers, optional review, and repository-backed handoffs. Use for model-cost-aware execution, explicit tiered-agent commands, or continuation when .tiered-agent state exists. Do not start the full workflow for simple, local, low-risk edits that one agent can finish directly.
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # Tiered Agent Orchestrator

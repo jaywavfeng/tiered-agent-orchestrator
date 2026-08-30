@@ -15,7 +15,8 @@ class SkillContractTests(unittest.TestCase):
         match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
-        self.assertIn("name: tiered-agent-orchestrator", frontmatter)
+        self.assertIn("name: tao", frontmatter)
+        self.assertIn('version: "0.1.1"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -34,8 +35,8 @@ class SkillContractTests(unittest.TestCase):
     def test_openai_metadata_is_discoverable(self) -> None:
         text = (ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         self.assertIn('display_name: "Tiered Agent Orchestrator"', text)
-        self.assertIn("$tiered-agent-orchestrator", text)
-        self.assertIn("allow_implicit_invocation: true", text)
+        self.assertIn("$tao", text)
+        self.assertIn("allow_implicit_invocation: false", text)
         self.assertNotIn("dependencies:", text)
 
     def test_all_json_assets_and_schemas_parse(self) -> None:
@@ -51,6 +52,7 @@ class SkillContractTests(unittest.TestCase):
 
     def test_eval_suite_covers_a_through_j(self) -> None:
         value = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
+        self.assertEqual(value["skill_name"], "tao")
         ids = [item["id"] for item in value["evals"]]
         self.assertEqual(ids, list("ABCDEFGHIJ"))
         for item in value["evals"]:
@@ -62,8 +64,8 @@ class SkillContractTests(unittest.TestCase):
         english = (ROOT / "README.md").read_text(encoding="utf-8")
         chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         shared = [
-            "$tiered-agent-orchestrator continue worker-1",
-            "$tiered-agent-orchestrator status",
+            "$tao continue worker-1",
+            "$tao status",
             "python scripts/statectl.py",
             "Benchmark pending",
             "Apache-2.0",
@@ -75,6 +77,15 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("你不需要复制任何上一段聊天内容。", chinese)
         self.assertIn("README.zh-CN.md", english)
         self.assertIn("README.md", chinese)
+
+    def test_legacy_invocation_name_is_absent(self) -> None:
+        legacy = "$tiered-agent-" + "orchestrator"
+        text_suffixes = {".json", ".md", ".py", ".yaml", ".yml"}
+        for path in ROOT.rglob("*"):
+            if not path.is_file() or path.suffix not in text_suffixes or ".git" in path.parts:
+                continue
+            with self.subTest(path=path):
+                self.assertNotIn(legacy, path.read_text(encoding="utf-8"))
 
     def test_local_markdown_links_resolve(self) -> None:
         markdown_files = [

@@ -6,7 +6,7 @@
 
 One project. One long-lived manager. The right number of workers. Shared repository state.
 
-> Project status: v0.1.0 · Apache-2.0 · Benchmark pending
+> Project status: v0.1.1 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -57,12 +57,14 @@ $HOME/.agents/skills/tiered-agent-orchestrator
 
 Other Agent Skills-compatible coding agents can install the same directory in their supported skill location. The portable contract is the root `SKILL.md`; `agents/openai.yaml` is optional OpenAI-specific metadata.
 
+The Skill is explicit-only and does not activate from ordinary language. Start an orchestration request with `$tao`.
+
 ### 2. Open the Project Lead
 
 Choose a strong model and describe the final goal naturally:
 
 ```text
-$tiered-agent-orchestrator Build the import pipeline, migrate existing callers, and run the full integration suite.
+$tao Build the import pipeline, migrate existing callers, and run the full integration suite.
 ```
 
 The Lead inspects the repository, creates `.tiered-agent` state, decides the architecture, and determines whether Worker delegation will actually save strong-model work.
@@ -73,7 +75,7 @@ A typical instruction is:
 
 ```text
 Create one economy Worker conversation and send:
-$tiered-agent-orchestrator continue worker-1
+$tao continue worker-1
 ```
 
 If three tasks are genuinely independent, the Lead may provide three separate continuation lines. If the tasks are coupled, it stays with one Worker.
@@ -81,18 +83,18 @@ If three tasks are genuinely independent, the Lead may provide three separate co
 Work normally in the Worker conversation. Return to the original Project Lead conversation for a blocker, ambiguous direction change, architecture decision, or management status:
 
 ```text
-$tiered-agent-orchestrator status
+$tao status
 ```
 
 ## Commands
 
 | Invocation | Behavior |
 |---|---|
-| `$tiered-agent-orchestrator <goal>` | Apply the complexity gate and initialize a Project Lead only for suitable work |
-| `$tiered-agent-orchestrator continue worker-1` | Continue a bounded Worker from repository state |
-| `$tiered-agent-orchestrator continue reviewer-1` | Continue an explicitly assigned review |
-| `$tiered-agent-orchestrator status` | Summarize Workers, review, blockers, risks, and next actor |
-| `$tiered-agent-orchestrator continue lead` | Resynchronize the original Lead with current repository state |
+| `$tao <goal>` | Apply the complexity gate and initialize a Project Lead only for suitable work |
+| `$tao continue worker-1` | Continue a bounded Worker from repository state |
+| `$tao continue reviewer-1` | Continue an explicitly assigned review |
+| `$tao status` | Summarize Workers, review, blockers, risks, and next actor |
+| `$tao continue lead` | Resynchronize the original Lead with current repository state |
 
 Simple, local, low-risk edits are completed directly without creating orchestration state.
 
