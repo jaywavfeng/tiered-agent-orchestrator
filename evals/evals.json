@@ -4,13 +4,14 @@
     {
       "id": "A",
       "prompt": "Use tiered orchestration to add a production-ready import pipeline across this repository. The architecture is unclear and implementation will take several stages.",
-      "expected_output": "The Project Lead creates repository state, distills a plan, assigns one bounded economy Worker by default, explicitly routes a native Worker to the economy model when supported (or gives the Owner the manual fallback), and provides a one-line continuation command.",
+      "expected_output": "The Project Lead creates repository state, distills a plan, assigns one bounded economy Worker by default, explicitly routes a native Worker to the economy model at xhigh when supported, verifies the effective runtime model (or gives the Owner the manual fallback), and provides a one-line continuation command.",
       "assertions": [
         "The response initializes durable project state rather than relying on chat history.",
         "Exactly one Worker is recommended unless independent parallel work is demonstrated.",
         "The Worker task includes scope and completion criteria.",
         "The Lead does not use a Worker that silently inherits the strong model.",
-        "After dispatch, the Lead yields for an event instead of polling Worker status."
+        "After dispatch, the Lead yields for an event instead of polling Worker status.",
+        "The Lead verifies effective runtime model evidence rather than trusting a nickname."
       ]
     },
     {
@@ -37,11 +38,12 @@
     {
       "id": "D",
       "prompt": "Migrate the storage layer, then update every service to the new interface, then rewrite integration tests. The service changes cannot compile until the storage migration is complete.",
-      "expected_output": "The Project Lead rejects cosmetic parallelism and reuses one long-lived Worker for the serialized assignments because the dependency chain is strong.",
+      "expected_output": "The Project Lead rejects cosmetic parallelism and reuses one long-lived Worker for the serialized assignments because the dependency chain is strong; a timeout does not justify a new analysis loop.",
       "assertions": [
         "The plan identifies the dependency ordering.",
         "Concurrent Workers are not assigned overlapping or blocked work.",
-        "A milestone boundary does not create a new Worker ID."
+        "A milestone boundary does not create a new Worker ID.",
+        "Timeout is not treated as a milestone."
       ]
     },
     {

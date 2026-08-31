@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.3.0"', frontmatter)
+        self.assertIn('version: "0.3.1"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -50,6 +50,9 @@ class SkillContractTests(unittest.TestCase):
         self.assertTrue(default_prompt.group(1).startswith("$tao"))
         self.assertIn("gpt-5.6-sol", default_prompt.group(1))
         self.assertIn("gpt-5.6-luna", default_prompt.group(1))
+        self.assertIn("xhigh", default_prompt.group(1))
+        self.assertIn("Terra", default_prompt.group(1))
+        self.assertIn("passive", default_prompt.group(1))
         self.assertRegex(text, r'(?m)^\s+allow_implicit_invocation:\s+false\s*$')
 
     def test_all_json_assets_and_schemas_parse(self) -> None:
@@ -120,7 +123,41 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn('model: "gpt-5.6-luna"', profile)
         self.assertIn("MUST NOT be omitted", profile)
         self.assertIn("MUST NOT spawn", profile)
-        self.assertIn("gpt-5.6-luna / High", profile)
+        self.assertIn('reasoning_effort: "xhigh"', profile)
+        self.assertIn("gpt-5.6-luna / xhigh", profile)
+
+    def test_completion_value_routing_and_escalation_contract(self) -> None:
+        principle = "Use the cheapest model that is likely to complete the task correctly without costly rework."
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
+        for text in (skill, protocol, profile):
+            self.assertIn(principle, text)
+        self.assertIn("gpt-5.6-luna", profile)
+        self.assertIn("Extra High (`xhigh`)", profile)
+        self.assertIn("gpt-5.6-terra", profile)
+        self.assertIn("First escalation", profile)
+        self.assertIn("SOL escalation", profile)
+        self.assertIn("Terra remains insufficient", profile)
+
+    def test_native_dispatch_verifies_effective_runtime_and_waits_by_event(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        runtime = (ROOT / "references" / "runtime-state.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        for text in (skill, protocol, runtime):
+            self.assertIn("actual/effective runtime model", text)
+            self.assertIn("nickname", text)
+            self.assertIn("unconfirmed", text)
+            self.assertIn("passive", text)
+            self.assertIn("timeout is not a milestone", text)
+        self.assertIn("same failure", skill)
+        self.assertIn("same failure", protocol)
 
     def test_lead_delegates_mechanical_work(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
@@ -145,11 +182,11 @@ class SkillContractTests(unittest.TestCase):
     def test_readmes_show_automatic_and_manual_economy_flows(self) -> None:
         english = (ROOT / "README.md").read_text(encoding="utf-8")
         chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
-        self.assertIn("explicit spawn of gpt-5.6-luna / High worker-1", english)
-        self.assertIn("Owner opens gpt-5.6-luna / High", english)
+        self.assertIn("explicit spawn of gpt-5.6-luna / xhigh worker-1", english)
+        self.assertIn("Owner opens gpt-5.6-luna / xhigh", english)
         self.assertIn("silently inherits Sol", english)
-        self.assertIn("显式 spawn gpt-5.6-luna / High worker-1", chinese)
-        self.assertIn("Owner 打开 gpt-5.6-luna / High", chinese)
+        self.assertIn("显式 spawn gpt-5.6-luna / xhigh worker-1", chinese)
+        self.assertIn("Owner 打开 gpt-5.6-luna / xhigh", chinese)
         self.assertIn("继承 Sol", chinese)
 
     def test_legacy_invocation_name_is_absent(self) -> None:

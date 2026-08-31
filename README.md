@@ -2,11 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Use expensive models for decisions. Use cheaper models for execution. Keep project state across agent conversations.**
+**Use the cheapest model that is likely to complete the task correctly without costly rework. Keep project state across agent conversations.**
 
 One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.3.0 · Apache-2.0 · Benchmark pending
+> Project status: v0.3.1 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -26,11 +26,13 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 
 **You never need to copy the previous conversation.**
 
-### Cost-first execution
+### Completion-value execution
 
-TAO optimizes for correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. Sol is reserved for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. Luna Workers perform searches, environment checks, implementation, experiments, tests, debugging, data/video processing, remote operations, and result packaging. Total tokens may rise slightly when expensive-model usage and credits fall substantially.
+> **Use the cheapest model that is likely to complete the task correctly without costly rework.**
 
-This routing is a hard constraint. When Codex native subagent dispatch supports an explicit model, the Lead must pass `gpt-5.6-luna` with High reasoning. If the host cannot reliably set the model, the Lead must not spawn: it stops and asks the Owner to open `gpt-5.6-luna / High` and send `$tao continue worker-1`. TAO must never create a Worker that silently inherits Sol to simulate low-cost delegation.
+TAO optimizes for correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. The goal is value per completed task—not the lowest single-run cost. Sol is reserved for ambiguity, architecture, major decisions, high-risk blockers, and final acceptance. Luna/xhigh Workers perform ordinary searches, environment checks, implementation, experiments, tests, debugging, data/video processing, remote operations, and result packaging; spending more Luna reasoning tokens is acceptable when it avoids rework.
+
+This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower reasoning merely to save a small one-off cost. When Codex native subagent dispatch supports an explicit model, the Lead must pass `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` (or the host equivalent). The Lead must verify the actual/effective runtime model from host metadata; `Worker luna` is only a nickname/UI label and does not prove the model. If the model cannot be confirmed, contradicts the dispatch, or inherited Sol, the Lead must stop that Worker and ask the Owner to open `gpt-5.6-luna / xhigh` manually and send `$tao continue worker-1`. A Luna capability gap escalates first to `gpt-5.6-terra / high` or `xhigh`; Sol is used only for architecture, major decisions, high-risk blockers, or when Terra remains insufficient. TAO must never create a Worker that silently inherits Sol to simulate low-cost delegation.
 
 ## What it does
 
@@ -75,7 +77,7 @@ Choose a strong model and describe the final goal naturally:
 $tao Build the import pipeline, migrate existing callers, and run the full integration suite.
 ```
 
-The Lead reads only enough of the repository to decide architecture, creates `.tiered-agent` state, and determines whether Worker delegation will reduce strong-model work. It must delegate routine mechanics to the economy Worker. After dispatch it yields for a completion, blocker, milestone, or Owner event; it does not poll `STATUS.json` or repeat checks.
+The Lead reads only enough of the repository to decide architecture, creates `.tiered-agent` state, and determines whether Worker delegation will reduce strong-model work. It must delegate routine mechanics to the economy Worker. After dispatch it may passively wait for an event that advances the Worker; it does not poll `STATUS.json` or repeat checks. A timeout is not a milestone: do not loop through timeout → Sol re-analysis → STATUS check → wait.
 
 ### 3. Start the default Worker once, then reuse it
 
@@ -128,9 +130,9 @@ Owner
   ↓
 Sol Project Lead
   ↓
-explicit spawn of gpt-5.6-luna / High worker-1
+explicit spawn of gpt-5.6-luna / xhigh worker-1
   ↓
-Sol stops and waits for an event
+Lead passively waits for an event (timeout is not a milestone)
   ↓
 Luna performs checks / implementation / training
   ↓
@@ -141,18 +143,18 @@ Sol reads the summary and chooses the next stage
 Lead reassigns the same worker-1
 ```
 
-When explicit economy routing is unavailable:
+When explicit economy routing or effective-model confirmation is unavailable:
 
 ```text
-Sol Project Lead prepares worker-1
+Sol Project Lead prepares worker-1 and stops any unverified native Worker
   ↓
 Sol stops
   ↓
-Owner opens gpt-5.6-luna / High and sends:
+Owner opens gpt-5.6-luna / xhigh and sends:
 $tao continue worker-1
 ```
 
-TAO does not continuously poll or duplicate Worker work after dispatch.
+TAO does not continuously poll or duplicate Worker work after dispatch. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
 
 ## Commands
 

@@ -100,9 +100,9 @@ The Worker always rereads current repository state when continued. Chat memory m
 
 ## Dispatch handoff
 
-When the host supports native subagents, a dispatch is valid only when the caller explicitly supplies the configured economy model and High reasoning and registers the subagent as a formal Worker. An omitted or unreliable model parameter is unsafe because it may inherit the Lead's strong model; in that case the Lead must stop and ask the Owner to create the Worker conversation manually. Native subagents remain subject to this state contract.
+When the host supports native subagents, a dispatch is valid only when the caller explicitly supplies the configured economy model and `xhigh` reasoning and registers the subagent as a formal Worker. The caller must verify the actual/effective runtime model from host evidence; a nickname or UI label is not proof. If the effective model is unconfirmed, omitted, unreliable, or contradictory, it is unsafe because it may inherit the Lead's strong model; in that case the Lead must stop the Worker and ask the Owner to create the economy Worker conversation manually. Native subagents remain subject to this state contract.
 
-After dispatch, no status polling loop is part of the runtime protocol. The Lead waits for a persisted completion, blocker, milestone, or Owner event. A manual Worker is resumed by returning to its original conversation with `$tao continue worker-N`.
+After dispatch, no high-frequency status polling loop is part of the runtime protocol. The Lead may passively wait for an event that advances the Worker, but a timeout is not a milestone and must not trigger a timeout → re-analysis → status-check loop. A manual Worker is resumed by returning to its original conversation with `$tao continue worker-N`.
 
 ## Owner feedback events
 

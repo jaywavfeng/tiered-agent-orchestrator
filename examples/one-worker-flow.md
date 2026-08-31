@@ -8,9 +8,9 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
 2. The Lead inspects the project, initializes `.tiered-agent`, writes the plan, and assigns `worker-1`.
 
-3. If native dispatch can explicitly select a model, the Lead dispatches the formal Worker with `model: gpt-5.6-luna` and High reasoning. Otherwise the Lead stops and tells the Owner:
+3. If native dispatch can explicitly select a model, the Lead dispatches the formal Worker with `model: gpt-5.6-luna` and `reasoning_effort: xhigh`, then verifies the actual/effective runtime model from host metadata. A nickname such as `Worker luna` is not evidence. If the model is unconfirmed or inherited Sol, the Lead stops that Worker and tells the Owner:
 
-   > Open `gpt-5.6-luna / High`, create one economy Worker conversation, and send:
+   > Open `gpt-5.6-luna / xhigh`, create one economy Worker conversation, and send:
    >
    > `$tao continue worker-1`
 
@@ -28,4 +28,4 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
    > `$tao status`
 
-The Owner never copies the previous conversation. After dispatch, the Lead does not poll `STATUS.json` or duplicate the assignment; it waits for an event or Owner return. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks, it records the evidence in its own blocker file and sends the Owner back to the same Lead conversation.
+The Owner never copies the previous conversation. After dispatch, the Lead may passively wait for an event but does not poll `STATUS.json` or duplicate the assignment; a timeout is not a milestone. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks or repeats an identical Luna failure path, it records the evidence, stops, and escalates to Terra first before considering Sol.

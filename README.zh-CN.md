@@ -2,11 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**让昂贵模型负责决策，让低成本模型负责执行，让项目状态跨 Agent 对话持续存在。**
+**使用最有可能正确完成任务且不会造成昂贵返工的最低成本模型，并让项目状态跨 Agent 对话持续存在。**
 
 一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
 
-> 项目状态：v0.3.0 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.3.1 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -26,11 +26,13 @@ Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完�
 
 **你不需要复制任何上一段聊天内容。**
 
-### 成本优先执行
+### 完成价值优先执行
 
-TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，再减少 credits/成本，再减少不必要的上下文和模型切换，最后才是减少总 Token。Sol 只处理模糊需求、架构、重大决策、困难 blocker 和最终验收；Luna Worker 负责文件搜索、环境检查、实现、实验、测试、调试、数据/视频处理、远程操作和结果整理。只要昂贵模型用量和 credits 明显下降，总 Token 略有增加也是可以接受的。
+> **Use the cheapest model that is likely to complete the task correctly without costly rework.**
 
-模型路由是硬约束。Codex 原生 subagent 支持显式模型时，Lead 必须传入 `gpt-5.6-luna` 和 High reasoning。宿主无法可靠指定模型时，Lead 不得 spawn，而应停止并提示 Owner 打开 `gpt-5.6-luna / High`，发送 `$tao continue worker-1`。TAO 不应创建一个默认继承 Sol 的 Worker 来假装完成低成本分层。
+TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，再减少 credits/成本，再减少不必要的上下文和模型切换，最后才是减少总 Token。目标是每个已完成任务的价值，而不是单次运行的最低成本。Sol 只处理模糊需求、架构、重大决策、高风险 blocker 和最终验收；普通执行默认由 Luna/xhigh Worker 负责。为避免返工，允许 Luna 使用更多 reasoning Token。
+
+模型路由是硬约束。普通执行直接默认 `gpt-5.6-luna / xhigh`，不要为了省一点单次 reasoning 导致返工。Codex 原生 subagent 支持显式模型时，Lead 必须传入 `model: "gpt-5.6-luna"` 和 `reasoning_effort: "xhigh"`（或宿主等价字段），并用宿主 metadata 验证 actual/effective runtime model；`Worker luna` 只是 nickname/UI 名称，不是证据。宿主无法可靠指定或确认模型，或发现继承 Sol 时，Lead 必须停止该 Worker，提示 Owner 手动打开 `gpt-5.6-luna / xhigh`，发送 `$tao continue worker-1`。Luna 能力不足时先升级 `gpt-5.6-terra / high` 或 `xhigh`；只有架构、重大决策、高风险 blocker 或 Terra 仍不足时才升级 Sol。TAO 不应创建一个默认继承 Sol 的 Worker 来假装完成低成本分层。
 
 ## 它会做什么
 
@@ -75,7 +77,7 @@ $HOME/.agents/skills/tiered-agent-orchestrator
 $tao 构建导入流水线、迁移现有调用方，并跑通完整集成测试。
 ```
 
-Lead 只读取做架构决策所需的最少入口，创建 `.tiered-agent` 状态，并判断委派是否能减少强模型工作量。常规机械工作必须下放给低成本 Worker；dispatch 后 Lead 不轮询 `STATUS.json`，而是等待完成、blocker、milestone 或 Owner 事件。
+Lead 只读取做架构决策所需的最少入口，创建 `.tiered-agent` 状态，并判断委派是否能减少强模型工作量。常规机械工作必须下放给低成本 Worker；dispatch 后 Lead 可以 passive wait 等待自动推进，但不轮询 `STATUS.json`。timeout 不算 milestone，禁止 timeout → Sol 重新分析 → 查 STATUS → 再 wait 的高频循环。
 
 ### 3. 只创建一次默认 Worker，之后持续复用
 
@@ -128,9 +130,9 @@ Owner
   ↓
 Sol Project Lead
   ↓
-显式 spawn gpt-5.6-luna / High worker-1
+显式 spawn gpt-5.6-luna / xhigh worker-1
   ↓
-Sol 停止并等待事件
+Lead passive wait 等待事件（timeout 不算 milestone）
   ↓
 Luna 完成检查 / 实现 / 训练
   ↓
@@ -141,18 +143,18 @@ Sol 读取摘要并决定下一阶段
 Lead 重新分配同一个 worker-1
 ```
 
-无法显式指定低成本模型时：
+无法显式指定或确认低成本模型时：
 
 ```text
-Sol Project Lead 准备 worker-1
+Sol Project Lead 准备 worker-1，并停止未经确认的 native Worker
   ↓
 Sol 停止
   ↓
-Owner 打开 gpt-5.6-luna / High 并发送：
+Owner 打开 gpt-5.6-luna / xhigh 并发送：
 $tao continue worker-1
 ```
 
-TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。
+TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。Luna 同一失败方案无新证据时必须停止，先升级 Terra，不得无意义重试。
 
 ## 命令
 

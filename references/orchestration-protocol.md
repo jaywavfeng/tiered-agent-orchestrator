@@ -4,9 +4,11 @@ Read this reference when acting as PROJECT_LEAD or when deciding Worker count an
 
 ## Cost-first model policy
 
-Correct completion is the first priority. The next priorities are reducing strong-model/Sol usage, reducing credits and cost, avoiding unnecessary context loading and model switches, and only then reducing total token count. It is acceptable for Luna/economy execution to use more tokens when that materially reduces Sol usage and credits.
+> **Use the cheapest model that is likely to complete the task correctly without costly rework.**
 
-Model tiers are hard routing constraints, not suggestions. PROJECT_LEAD reserves the strong tier for ambiguous intent, architecture, decomposition, major decisions, difficult blockers, and final acceptance. WORKER handles routine execution on the economy tier. REVIEWER defaults to balanced or another tier below strong; strong review is reserved for genuine high-risk architecture, algorithm, security, or integration decisions. Exact host mappings live in the selected profile.
+Optimize for completion-value efficiency, not the lowest single-run cost. Correct completion is the first priority. The next priorities are reducing strong-model usage, reducing credits and cost, avoiding unnecessary context loading and model switches, and only then reducing total token count. Economy execution may use more reasoning tokens when that materially reduces rework, escalations, or credits.
+
+Model tiers are hard routing constraints, not suggestions. PROJECT_LEAD reserves the strong tier for ambiguous intent, architecture, decomposition, major decisions, difficult blockers, and final acceptance. WORKER handles routine execution on the economy tier at the configured highest practical reasoning effort; do not reduce reasoning merely to shave a small per-run cost. REVIEWER defaults to balanced or another tier below strong; strong review is reserved for genuine high-risk architecture, algorithm, security, or integration decisions. Exact host mappings live in the selected profile.
 
 ## Roles
 
@@ -26,6 +28,8 @@ The Lead is event-driven. It does not supervise every implementation step.
 
 A Worker is a long-lived execution role and conversation, not a disposable task ID. It executes one clear assignment at a time over a declared write scope, and the Lead may reuse it for later milestones. It may implement, run commands, test, debug within the plan, and accept unambiguous local corrections. It must not invent intent, rewrite architecture, or expand its authority.
 
+Workers stop instead of repeating the same failure path without new evidence. A genuine capability gap escalates first to the configured balanced tier; the strong tier is reserved for architecture, major decisions, high-risk blockers, or a balanced-tier attempt that remains insufficient. This protects completion value by avoiding cheap but wasteful rework.
+
 ### REVIEWER
 
 A Reviewer evaluates a bounded change against explicit criteria and evidence. Balanced review is the default for medium or large work. Strong review is reserved for high-risk, architecture-heavy, algorithmic, or multi-Worker integration changes.
@@ -35,13 +39,14 @@ A Reviewer evaluates a bounded change against explicit criteria and evidence. Ba
 Codex native subagents may host TAO Workers, but only under all of these conditions:
 
 - the host reliably supports an explicit model parameter;
-- the dispatch **MUST** explicitly select the configured economy model with High reasoning; omitting `model` is forbidden;
+- the dispatch **MUST** explicitly select the configured economy model with `xhigh` reasoning; omitting `model` is forbidden;
+- after dispatch, the Lead verifies the actual/effective runtime model from host metadata or an equivalent runtime event. A nickname or UI label is not evidence. If the effective model is unconfirmed, contradictory, or inherited the strong tier, the Lead stops that Worker and falls back to a manually opened economy Worker;
 - the subagent is registered as one formal `worker-N` and follows its `TASK.md`, scope, status, dependencies, and ownership rules;
 - fan-out remains subject to the parallelization gate and is never automatic merely because the host supports multi-agent execution.
 
-If the host cannot reliably select the economy model, PROJECT_LEAD **MUST NOT** spawn a subagent. It stops and instructs the Owner to manually open the economy model at High reasoning and send `$tao continue worker-N`.
+If the host cannot reliably select or confirm the economy model, PROJECT_LEAD **MUST NOT** spawn a subagent. It stops and instructs the Owner to manually open the economy model at its configured `xhigh` reasoning and send `$tao continue worker-N`.
 
-After dispatching, PROJECT_LEAD **MUST NOT** continuously poll `STATUS.json`, repeatedly wait/check or prompt the Worker, duplicate its task, or implement its assignment in parallel. It yields for a completion, blocker, milestone event, or Owner event. With a manually opened Worker conversation, the Lead ends its turn and waits for the Owner to return with `continue`.
+After dispatching, PROJECT_LEAD **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout then re-analyze, prompt the Worker, duplicate its task, or implement its assignment in parallel. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resumes for a completion, blocker, milestone event, or Owner event. With a manually opened Worker conversation, the Lead ends its turn and waits for the Owner to return with `continue`.
 
 ## Instruction priority
 

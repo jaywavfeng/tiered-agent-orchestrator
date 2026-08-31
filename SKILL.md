@@ -4,19 +4,21 @@ description: Orchestrate large, multi-stage, or long-running engineering work wi
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.3.0"
+  version: "0.3.1"
 ---
 
 # Tiered Agent Orchestrator
 
-Use expensive intelligence only where expensive intelligence is needed. The optimization priority is correct completion first, then reducing strong-model/Sol usage, then reducing credits/cost, then reducing unnecessary context and model switches, and only then reducing total token count. A run is successful when strong-model usage falls while Sol remains focused on high-value decisions, even if Luna uses somewhat more tokens.
+> **Use the cheapest model that is likely to complete the task correctly without costly rework.**
+
+Use expensive intelligence only where expensive intelligence is needed. Optimize for completion-value efficiency: correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. A run is successful when strong-model usage falls without trading away correctness; spending more economy-model tokens is appropriate when it prevents rework.
 
 - PROJECT_LEAD makes decisions and distills intent.
 - WORKER is a reusable, long-lived execution conversation that performs successive bounded assignments.
 - REVIEWER checks completed work when the expected quality gain justifies another model switch.
 - The repository carries operational state; chat history is never a handoff dependency.
 
-The model tier is a hard constraint. PROJECT_LEAD uses the configured strong model only for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. WORKER uses the configured economy model for nearly all execution. See the OpenAI profile for exact model and reasoning labels.
+The model tier is a hard constraint. PROJECT_LEAD uses the configured strong model only for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. WORKER uses the configured economy model with the profile's highest practical reasoning effort for nearly all execution; do not under-reason ordinary work merely to lower one run's cost. See the OpenAI profile for exact model and reasoning labels.
 
 ## Route the request
 
@@ -57,10 +59,11 @@ For a new project:
 
 ### Hard model-routing and dispatch rules
 
-- If the host can natively spawn a TAO Worker with an explicit model, PROJECT_LEAD **MUST** pass the configured economy model and High reasoning. The `model` parameter **MUST NOT** be omitted, and the spawned agent **MUST** map to one formal `worker-N` assignment.
+- If the host can natively spawn a TAO Worker with an explicit model, PROJECT_LEAD **MUST** pass the configured economy model and `xhigh` reasoning. The `model` parameter **MUST NOT** be omitted, and the spawned agent **MUST** map to one formal `worker-N` assignment.
+- After native dispatch, PROJECT_LEAD **MUST** verify the actual/effective runtime model using host-returned metadata or an equivalent runtime event. A nickname or UI label such as `Worker luna` is not evidence. If the effective model is unconfirmed, contradictory, or inherited the strong model, PROJECT_LEAD **MUST** stop that Worker and fall back to a manually opened economy-model Worker at the profile's configured reasoning effort.
 - If the host cannot reliably set an economy model explicitly, PROJECT_LEAD **MUST NOT** spawn a Worker. Stop the turn and tell the Owner to create a top-level economy Worker manually using the profile's model/reasoning and `$tao continue worker-N`.
 - A native subagent is only a Worker runtime; it remains bound by `TASK.md`, scope, status, dependencies, ownership, and the single-writer protocol. The host's multi-agent capability never justifies fan-out.
-- After dispatching a Worker, **MUST NOT** continuously poll `STATUS.json`, repeatedly wait/check, duplicate the assignment, or perform the Worker's execution. Yield for a completion, blocker, milestone, or Owner event. For a manually opened Worker, end the Lead turn and wait for the Owner to return with `continue`.
+- After dispatching a Worker, **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout and re-analyze, duplicate the assignment, or perform the Worker's execution. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resume on a completion, blocker, milestone, or Owner event. For a manually opened Worker, end the Lead turn and wait for the Owner to return with `continue`.
 
 Before every action, ask whether it needs strong reasoning. If not, delegate it to the current Worker. PROJECT_LEAD **MUST NOT** perform routine repository scans, SSH/GPU/disk/environment checks (including `nvidia-smi`), dependency installation, training, tests, implementation, debugging, video/data processing, chart generation, deployment, or repeated shell commands. Only the smallest read-only check required for an architecture decision is allowed.
 
@@ -89,7 +92,7 @@ When the assignment is done, set the status to `completed` and return control to
 
 Apply clear local Owner corrections directly when scope and intent are unambiguous. For ambiguous, directional, or architecture-changing feedback, preserve the Owner's exact words with `statectl.py record-owner-feedback`, pause conflicting work, and direct the Owner back to the original Project Lead conversation.
 
-When blocked, follow [escalation and review](references/escalation-and-review.md). Stop repetitive attempts before cheap tokens become waste.
+When blocked, follow [escalation and review](references/escalation-and-review.md). Stop the same failure path when it repeats instead of retrying it with Luna without new evidence; escalate the capability gap to the first lower-cost escalation tier before considering the strong tier.
 
 ## Reviewer workflow
 
