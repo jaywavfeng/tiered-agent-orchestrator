@@ -2,6 +2,10 @@
 
 Read this reference when acting as PROJECT_LEAD or when deciding Worker count and ownership.
 
+## Explicit activation
+
+TAO runs only when the current Owner request explicitly invokes `$tao`. Existing `.tiered-agent` state, a prior TAO run, repository naming, or maintenance of TAO's own source does not activate the protocol. Without an explicit invocation, do not inspect or mutate orchestration state.
+
 ## Cost-first model policy
 
 > **Use the cheapest model that is likely to complete the task correctly without costly rework.**
@@ -40,11 +44,11 @@ Codex native subagents may host TAO Workers, but only under all of these conditi
 
 - the host reliably supports an explicit model parameter;
 - the dispatch **MUST** explicitly select the configured economy model with `xhigh` reasoning; omitting `model` is forbidden;
-- after dispatch, the Lead verifies the actual/effective runtime model from host metadata or an equivalent runtime event. A nickname or UI label is not evidence. If the effective model is unconfirmed, contradictory, or inherited the strong tier, the Lead stops that Worker and falls back to a manually opened economy Worker;
+- after dispatch, the Lead verifies the actual/effective route from the structured host receipt or stronger effective-model metadata. A successful structured call is sufficient when the host contract guarantees the accepted `model` and reasoning overrides. If fields are unsupported/rejected or returned effective metadata contradicts them, the Lead stops the Worker and fails closed. The Worker never performs recursive self-verification of an already confirmed host route;
 - the subagent is registered as one formal `worker-N` and follows its `TASK.md`, scope, status, dependencies, and ownership rules;
 - fan-out remains subject to the parallelization gate and is never automatic merely because the host supports multi-agent execution.
 
-If the host cannot reliably select or confirm the economy model, PROJECT_LEAD **MUST NOT** spawn a subagent. It stops and instructs the Owner to manually open the economy model at its configured `xhigh` reasoning and send `$tao continue worker-N`.
+If the host cannot reliably select or confirm the economy model, PROJECT_LEAD **MUST NOT** spawn a subagent. It stops and instructs the Owner to manually open the economy model at its configured `xhigh` reasoning and send `$tao continue worker-N`. The manual conversation's host-owned current model/reasoning selector is the verification boundary; it must not demand a second manual Worker as proof. A lower reasoning setting is corrected in the same conversation. An unavailable value is reported as unknown, never guessed.
 
 After dispatching, PROJECT_LEAD **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout then re-analyze, prompt the Worker, duplicate its task, or implement its assignment in parallel. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resumes for a completion, blocker, milestone event, or Owner event. With a manually opened Worker conversation, the Lead ends its turn and waits for the Owner to return with `continue`.
 
@@ -88,6 +92,8 @@ When a Worker completes an assignment and remains suitable for the next one, PRO
 
 Only PROJECT_LEAD may perform this transaction because it writes Lead-owned assignment and global state and resets the Worker status. A Worker must not use `set-worker-status` to move itself directly from `completed` to `ready`. An `inactive` Worker stays inactive; create or select another Worker only when the new-Worker gate is satisfied.
 
+Worker dependencies refer to successful completed deliverables. `inactive` means unavailable or abandoned and never satisfies a dependency. Do not reassign an upstream Worker while a ready, active, blocked, or waiting dependent still references its completed assignment.
+
 ## Assignment contract
 
 Every Worker task must state:
@@ -113,6 +119,8 @@ Read repository instructions, relevant entrypoints, current validation, and enou
 
 Read global state, active statuses, pending Owner feedback, blockers, and the handoff. Inspect code and diffs only for discrepancies, decisions, or review.
 
+After a runtime crash or native-agent exit, resume from repository state. A runtime exit does not change Worker status and never authorizes a duplicate Worker or Lead-side implementation. Reassignment and review-assignment commands use durable recovery markers; the next `statectl.py` command finishes a compatible interrupted transaction or refuses to overwrite newer conflicting state.
+
 ### Worker
 
 Read minimal state, its task and status, relevant directives, named plan sections, and declared code dependencies. Do not load every reference or the full repository by default.
@@ -131,6 +139,10 @@ Use these phases:
 - `complete`: completion criteria and required validation are satisfied.
 
 Worker assignment completion is not project completion. A Worker may move through `ready → active → completed` multiple times as the Lead archives and reassigns successive assignments. Project `complete` is reserved for the final project goal.
+
+Project completion is frozen but reopenable. Read-only Owner questions, summaries, explanations, and status requests leave it complete. New actionable work uses `reopen-project`, which first archives an immutable completion snapshot and then returns the project to `planning/active`. The Lead reassigns a suitable completed Worker afterward. Ambiguous intent stays complete until clarified.
+
+Project completion is rejected while a Worker is unfinished, Owner feedback from the active run is pending, or a required review is unfinished or stale. If reviewed code changes, the old approval is detached and cannot satisfy completion; the completed review is archived when the replacement review is assigned.
 
 Use these project statuses:
 

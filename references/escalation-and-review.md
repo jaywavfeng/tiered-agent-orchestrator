@@ -15,6 +15,8 @@ A Worker may apply Owner feedback directly only when all are true:
 
 Otherwise preserve the Owner's exact words in the inbox, stop conflicting work, update the Worker status, and ask the Owner to return to the original Project Lead conversation.
 
+Completed projects use a different gate: read-only questions are answered without mutation, while actionable work is preserved by `reopen-project` and its completion snapshot. A completed Worker must not create an inbox event inside frozen completed state.
+
 ## Escalation signals
 
 Escalate when one or more are true:
@@ -58,3 +60,5 @@ Use balanced review for medium or large changes whose correctness benefits from 
 - evidence that the plan itself may be wrong.
 
 Review findings need file or test evidence. The Reviewer may approve, request bounded corrections, or escalate a decision. It must not silently redesign the project.
+
+Any implementation change after a completed review makes that approval stale. Reassignment detaches the old reviewer while retaining the review requirement. The next review assignment archives the completed evidence, and project completion remains blocked until the replacement review finishes.

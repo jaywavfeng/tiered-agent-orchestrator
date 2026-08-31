@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import uuid
@@ -35,7 +36,12 @@ PROJECT_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 WORKER_ID_RE = re.compile(r"^worker-[1-9][0-9]*$")
 REVIEWER_ID_RE = re.compile(r"^reviewer-[1-9][0-9]*$")
 ASSIGNMENT_HISTORY_RE = re.compile(r"^assignment-([0-9]{4,})$")
+COMPLETION_HISTORY_RE = re.compile(r"^completion-([0-9]{4,})$")
+REVIEW_HISTORY_RE = re.compile(r"^review-([0-9]{4,})$")
+OWNER_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 ACTIVE_WORKER_STATUSES = {"ready", "active", "blocked", "waiting-owner"}
+REASSIGNMENT_MARKER = ".reassign.json"
+REVIEW_ASSIGNMENT_MARKER = ".assign-review.json"
 
 
 class StateError(RuntimeError):
@@ -157,6 +163,38 @@ def save_state(runtime: Path, state: dict[str, Any]) -> None:
     atomic_write_json(state_path(runtime), state)
 
 
+def scope_root(value: str) -> tuple[str, bool]:
+    """Return the literal prefix and whether a scope contains glob syntax."""
+    normalized = value.replace("\\", "/").strip("/")
+    parts = normalized.split("/") if normalized else []
+    literal: list[str] = []
+    has_glob = False
+    for part in parts:
+        if any(character in part for character in "*?["):
+            has_glob = True
+            break
+        literal.append(part)
+    return "/".join(literal), has_glob
+
+
+def scopes_overlap(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    left_root, left_glob = scope_root(left)
+    right_root, right_glob = scope_root(right)
+    if not (left_glob or right_glob):
+        return False
+    if (left_glob and not left_root) or (right_glob and not right_root):
+        return True
+    if not left_root or not right_root:
+        return False
+    return (
+        left_root == right_root
+        or left_root.startswith(right_root + "/")
+        or right_root.startswith(left_root + "/")
+    )
+
+
 def validate_status_object(
     value: dict[str, Any], expected_id: str, path: Path
 ) -> list[str]:
@@ -236,6 +274,8 @@ def validate_assignment_history(worker_dir: Path, worker_id: str) -> list[str]:
     errors: list[str] = []
     seen_revisions: set[int] = set()
     for assignment_dir in sorted(history_dir.iterdir()):
+        if assignment_dir.name.startswith(".assignment-"):
+            continue
         match = ASSIGNMENT_HISTORY_RE.fullmatch(assignment_dir.name)
         if not assignment_dir.is_dir() or match is None:
             errors.append(f"{assignment_dir}: invalid assignment history entry")
@@ -265,6 +305,144 @@ def validate_assignment_history(worker_dir: Path, worker_id: str) -> list[str]:
                 errors.append(
                     f"{archived_status_path}: archived assignment must be completed"
                 )
+    return errors
+
+
+def validate_review_history(review_dir: Path) -> list[str]:
+    history_dir = review_dir / "history"
+    if not history_dir.exists():
+        return []
+    if not history_dir.is_dir():
+        return [f"{history_dir}: review history must be a directory"]
+
+    errors: list[str] = []
+    for entry in sorted(history_dir.iterdir()):
+        if entry.name.startswith(".review-"):
+            continue
+        match = REVIEW_HISTORY_RE.fullmatch(entry.name)
+        if not entry.is_dir() or match is None:
+            errors.append(f"{entry}: invalid review history entry")
+            continue
+        for name in ("TASK.md", "STATUS.json", "REPORT.md"):
+            if not (entry / name).is_file():
+                errors.append(f"{entry}: missing archived {name}")
+        status_path_value = entry / "STATUS.json"
+        if status_path_value.is_file():
+            try:
+                status = read_json(status_path_value)
+            except StateError as exc:
+                errors.append(str(exc))
+                continue
+            errors.extend(validate_review_status(status, status_path_value))
+            if status.get("status") != "completed":
+                errors.append(f"{status_path_value}: archived review must be completed")
+    return errors
+
+
+def validate_completion_history(runtime: Path, project_id: str) -> list[str]:
+    history_dir = runtime / "history"
+    if not history_dir.exists():
+        return []
+    if not history_dir.is_dir():
+        return [f"{history_dir}: completion history must be a directory"]
+
+    errors: list[str] = []
+    for entry in sorted(history_dir.iterdir()):
+        if entry.name.startswith(".completion-"):
+            continue
+        match = COMPLETION_HISTORY_RE.fullmatch(entry.name)
+        if not entry.is_dir() or match is None:
+            errors.append(f"{entry}: invalid completion history entry")
+            continue
+        for name in (
+            "STATE.json",
+            "PLAN.md",
+            "OWNER_DIRECTIVES.md",
+            "HANDOFF.md",
+            "REOPEN.json",
+        ):
+            if not (entry / name).is_file():
+                errors.append(f"{entry}: missing completion snapshot {name}")
+        archived_state_path = entry / "STATE.json"
+        if not archived_state_path.is_file():
+            continue
+        try:
+            archived_state = read_json(archived_state_path)
+        except StateError as exc:
+            errors.append(str(exc))
+            continue
+        if archived_state.get("project_id") != project_id:
+            errors.append(f"{archived_state_path}: project_id does not match runtime")
+        if archived_state.get("phase") != "complete" or archived_state.get("status") != "complete":
+            errors.append(f"{archived_state_path}: snapshot must be complete/complete")
+        archived_workers = archived_state.get("workers", [])
+        if not isinstance(archived_workers, list):
+            errors.append(f"{archived_state_path}: workers must be a list")
+            archived_workers = []
+        for worker in archived_workers:
+            if not isinstance(worker, dict):
+                continue
+            for key in ("task_path", "status_path"):
+                try:
+                    target = checked_relative_path(entry, worker.get(key), f"completion.{key}")
+                except StateError as exc:
+                    errors.append(str(exc))
+                    continue
+                if not target.is_file():
+                    errors.append(f"{entry}: missing snapshotted {key}: {target}")
+                elif key == "status_path" and isinstance(worker.get("id"), str):
+                    try:
+                        worker_status = read_json(target)
+                    except StateError as exc:
+                        errors.append(str(exc))
+                    else:
+                        errors.extend(
+                            validate_status_object(worker_status, worker["id"], target)
+                        )
+                        if worker_status.get("status") not in {"completed", "inactive"}:
+                            errors.append(
+                                f"{target}: completion snapshot Worker must be completed or inactive"
+                            )
+            task_path_value = worker.get("task_path")
+            if isinstance(task_path_value, str):
+                try:
+                    worker_dir = checked_relative_path(
+                        entry, task_path_value, "completion.worker.task_path"
+                    ).parent
+                    if not (worker_dir / "BLOCKER.md").is_file():
+                        errors.append(f"{entry}: missing snapshotted Worker BLOCKER.md")
+                except StateError:
+                    pass
+        review = archived_state.get("review")
+        if isinstance(review, dict):
+            for key in ("task_path", "status_path", "report_path"):
+                try:
+                    target = checked_relative_path(entry, review.get(key), f"completion.review.{key}")
+                except StateError as exc:
+                    errors.append(str(exc))
+                    continue
+                if not target.is_file():
+                    errors.append(f"{entry}: missing snapshotted review file: {target}")
+                elif key == "status_path":
+                    try:
+                        archived_review_status = read_json(target)
+                    except StateError as exc:
+                        errors.append(str(exc))
+                    else:
+                        errors.extend(validate_review_status(archived_review_status, target))
+        reopen_path = entry / "REOPEN.json"
+        if reopen_path.is_file():
+            try:
+                reopen = read_json(reopen_path)
+            except StateError as exc:
+                errors.append(str(exc))
+                continue
+            if reopen.get("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
+                errors.append(f"{reopen_path}: unsupported schema_version")
+            if not isinstance(reopen.get("reason"), str) or not reopen["reason"].strip():
+                errors.append(f"{reopen_path}: reason must be a non-empty string")
+            if not check_timestamp(reopen.get("reopened_at")):
+                errors.append(f"{reopen_path}: reopened_at must be an ISO-8601 UTC timestamp")
     return errors
 
 
@@ -330,7 +508,8 @@ def validate_runtime(runtime: Path) -> list[str]:
 
     seen_ids: set[str] = set()
     registry: dict[str, dict[str, Any]] = {}
-    active_scopes: dict[str, str] = {}
+    worker_statuses: dict[str, str] = {}
+    active_scopes: list[tuple[str, str]] = []
     for index, worker in enumerate(workers):
         prefix = f"STATE.json: workers[{index}]"
         if not isinstance(worker, dict):
@@ -350,7 +529,9 @@ def validate_runtime(runtime: Path) -> list[str]:
         seen_ids.add(worker_id)
         registry[worker_id] = worker
         for key in ("write_scope", "depends_on"):
-            if not isinstance(worker[key], list) or not all(isinstance(item, str) for item in worker[key]):
+            if not isinstance(worker[key], list) or not all(
+                isinstance(item, str) and item.strip() for item in worker[key]
+            ):
                 errors.append(f"{prefix}.{key} must be a list of strings")
 
         try:
@@ -375,34 +556,16 @@ def validate_runtime(runtime: Path) -> list[str]:
             errors.append(str(exc))
             continue
         errors.extend(validate_status_object(status_value, worker_id, status_file))
-        if status_value.get("status") == "active":
-            for dependency in worker.get("depends_on", []):
-                dependency_entry = registry.get(dependency)
-                if dependency_entry is None:
-                    continue
-                try:
-                    dependency_status_path = checked_relative_path(
-                        runtime,
-                        dependency_entry["status_path"],
-                        f"{worker_id}.dependency.status_path",
-                    )
-                    dependency_status = read_json(dependency_status_path).get("status")
-                except StateError as exc:
-                    errors.append(str(exc))
-                    continue
-                if dependency_status not in {"completed", "inactive"}:
-                    errors.append(
-                        f"Active Worker {worker_id} has incomplete dependency "
-                        f"{dependency} ({dependency_status})"
-                    )
+        worker_statuses[worker_id] = status_value.get("status")
         if status_value.get("status") in ACTIVE_WORKER_STATUSES:
             for scope in worker.get("write_scope", []):
-                if scope in active_scopes:
-                    errors.append(
-                        f"Active write scope {scope!r} is shared by {active_scopes[scope]} and {worker_id}"
-                    )
-                else:
-                    active_scopes[scope] = worker_id
+                for other_scope, other_id in active_scopes:
+                    if scopes_overlap(scope, other_scope):
+                        errors.append(
+                            f"Active write scope {scope!r} for {worker_id} overlaps "
+                            f"{other_scope!r} for {other_id}"
+                        )
+                active_scopes.append((scope, worker_id))
 
     for worker_id, worker in registry.items():
         for dependency in worker.get("depends_on", []):
@@ -410,6 +573,13 @@ def validate_runtime(runtime: Path) -> list[str]:
                 errors.append(f"{worker_id} cannot depend on itself")
             elif dependency not in registry:
                 errors.append(f"{worker_id} depends on unknown Worker {dependency}")
+            elif worker_statuses.get(worker_id) in {"active", "completed"} and worker_statuses.get(
+                dependency
+            ) != "completed":
+                errors.append(
+                    f"Active Worker {worker_id} has incomplete dependency "
+                    f"{dependency} ({worker_statuses.get(dependency)})"
+                )
 
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -430,6 +600,7 @@ def validate_runtime(runtime: Path) -> list[str]:
         visit(worker_id)
 
     review = state["review"]
+    current_review_status: Optional[dict[str, Any]] = None
     review_required_fields = {
         "required",
         "level",
@@ -452,8 +623,8 @@ def validate_runtime(runtime: Path) -> list[str]:
             not isinstance(reviewer_id, str) or not REVIEWER_ID_RE.fullmatch(reviewer_id)
         ):
             errors.append("STATE.json: review.reviewer_id is invalid")
-        if review["required"] and reviewer_id is None:
-            errors.append("STATE.json: required review must name a reviewer")
+        if not review["required"] and reviewer_id is not None:
+            errors.append("STATE.json: optional review must not name a reviewer")
         for key in ("task_path", "status_path", "report_path"):
             try:
                 target = checked_relative_path(runtime, review[key], f"review.{key}")
@@ -465,12 +636,37 @@ def validate_runtime(runtime: Path) -> list[str]:
         try:
             review_status_path = checked_relative_path(runtime, review["status_path"], "review.status_path")
             if review_status_path.is_file():
-                review_status = read_json(review_status_path)
-                errors.extend(validate_review_status(review_status, review_status_path))
-                if reviewer_id != review_status.get("reviewer_id"):
+                current_review_status = read_json(review_status_path)
+                errors.extend(validate_review_status(current_review_status, review_status_path))
+                if reviewer_id is not None and reviewer_id != current_review_status.get("reviewer_id"):
                     errors.append("STATE.json and review/STATUS.json reviewer_id disagree")
         except StateError as exc:
             errors.append(str(exc))
+
+    if state["phase"] == "review":
+        if not isinstance(review, dict) or not review.get("required") or review.get("reviewer_id") is None:
+            errors.append("STATE.json: review phase requires an assigned review")
+    if state["phase"] == "complete":
+        unfinished = sorted(
+            worker_id
+            for worker_id, status in worker_statuses.items()
+            if status not in {"completed", "inactive"}
+        )
+        if unfinished:
+            errors.append(
+                "STATE.json: complete project has unfinished Workers: " + ", ".join(unfinished)
+            )
+        if isinstance(review, dict) and review.get("required"):
+            if (
+                review.get("reviewer_id") is None
+                or current_review_status is None
+                or current_review_status.get("status") != "completed"
+                or current_review_status.get("reviewer_id") != review.get("reviewer_id")
+            ):
+                errors.append("STATE.json: complete project has unfinished required review")
+
+    errors.extend(validate_review_history(runtime / "review"))
+    errors.extend(validate_completion_history(runtime, state["project_id"]))
 
     return errors
 
@@ -597,7 +793,12 @@ def command_add_worker(args: argparse.Namespace) -> int:
         )
         if read_json(status_file)["status"] not in ACTIVE_WORKER_STATUSES:
             continue
-        overlap = sorted(set(scopes) & set(item["write_scope"]))
+        overlap = sorted(
+            f"{scope} <-> {other_scope}"
+            for scope in scopes
+            for other_scope in item["write_scope"]
+            if scopes_overlap(scope, other_scope)
+        )
         if overlap:
             raise StateError(
                 f"Write scope overlaps with {item['id']}: {', '.join(overlap)}"
@@ -657,25 +858,145 @@ def archived_assignment_revisions(worker_dir: Path) -> list[int]:
     return revisions
 
 
-def archive_worker_assignment(worker_dir: Path) -> int:
+def write_assignment_archive(
+    worker_dir: Path, revision: int, files: dict[str, str]
+) -> None:
     history_dir = worker_dir / "history"
     history_dir.mkdir(exist_ok=True)
-    revision = max(archived_assignment_revisions(worker_dir), default=0) + 1
     destination = history_dir / f"assignment-{revision:04d}"
+    if destination.exists():
+        for name, content in files.items():
+            if (destination / name).read_text(encoding="utf-8") != content:
+                raise StateError(f"Existing assignment archive conflicts: {destination}")
+        for stale in history_dir.glob(f".assignment-{revision:04d}-*"):
+            if stale.is_dir():
+                shutil.rmtree(stale)
+        return
     temporary = Path(
         tempfile.mkdtemp(prefix=f".assignment-{revision:04d}-", dir=history_dir)
     )
     try:
-        for name in ("TASK.md", "STATUS.json", "BLOCKER.md"):
-            write_new_text(temporary / name, (worker_dir / name).read_text(encoding="utf-8"))
+        for name, content in files.items():
+            write_new_text(temporary / name, content)
         os.replace(temporary, destination)
+        for stale in history_dir.glob(f".assignment-{revision:04d}-*"):
+            if stale.is_dir():
+                shutil.rmtree(stale)
     except Exception:
         if temporary.exists():
             for child in temporary.iterdir():
                 child.unlink()
             temporary.rmdir()
         raise
-    return revision
+
+
+def validate_reassignment_marker(value: dict[str, Any], path: Path) -> None:
+    required = {
+        "schema_version",
+        "worker_id",
+        "archived_revision",
+        "new_revision",
+        "old_files",
+        "new_files",
+        "write_scope",
+        "depends_on",
+        "milestone",
+        "invalidate_review",
+    }
+    if set(value) != required or value.get("schema_version") != SCHEMA_VERSION:
+        raise StateError(f"Invalid pending reassignment marker: {path}")
+    if not isinstance(value.get("worker_id"), str) or not WORKER_ID_RE.fullmatch(value["worker_id"]):
+        raise StateError(f"Invalid Worker in pending reassignment: {path}")
+    archived_revision = value.get("archived_revision")
+    if (
+        not isinstance(archived_revision, int)
+        or archived_revision < 1
+        or value.get("new_revision") != archived_revision + 1
+    ):
+        raise StateError(f"Invalid revision in pending reassignment: {path}")
+    for key in ("old_files", "new_files"):
+        files = value.get(key)
+        if not isinstance(files, dict) or set(files) != {"TASK.md", "STATUS.json", "BLOCKER.md"}:
+            raise StateError(f"Invalid {key} in pending reassignment: {path}")
+        if not all(isinstance(content, str) for content in files.values()):
+            raise StateError(f"Invalid {key} content in pending reassignment: {path}")
+    if not isinstance(value.get("write_scope"), list) or not all(
+        isinstance(item, str) and item.strip() for item in value["write_scope"]
+    ):
+        raise StateError(f"Invalid write scope in pending reassignment: {path}")
+    if not isinstance(value.get("depends_on"), list) or not all(
+        isinstance(item, str) and WORKER_ID_RE.fullmatch(item) for item in value["depends_on"]
+    ):
+        raise StateError(f"Invalid dependencies in pending reassignment: {path}")
+    if not isinstance(value.get("milestone"), str) or not value["milestone"].strip():
+        raise StateError(f"Invalid milestone in pending reassignment: {path}")
+    if not isinstance(value.get("invalidate_review"), bool):
+        raise StateError(f"Invalid review flag in pending reassignment: {path}")
+    try:
+        old_status = json.loads(value["old_files"]["STATUS.json"])
+        new_status = json.loads(value["new_files"]["STATUS.json"])
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise StateError(f"Invalid status JSON in pending reassignment: {path}") from exc
+    if not isinstance(old_status, dict) or not isinstance(new_status, dict):
+        raise StateError(f"Invalid status object in pending reassignment: {path}")
+    if validate_status_object(old_status, value["worker_id"], path) or old_status.get(
+        "status"
+    ) != "completed":
+        raise StateError(f"Pending reassignment does not archive a completed status: {path}")
+    if validate_status_object(new_status, value["worker_id"], path) or new_status.get(
+        "status"
+    ) != "ready":
+        raise StateError(f"Pending reassignment does not publish a ready status: {path}")
+
+
+def recover_reassignment(runtime: Path, marker_path: Path) -> None:
+    marker = read_json(marker_path)
+    validate_reassignment_marker(marker, marker_path)
+    state = load_state(runtime)
+    registry = {item["id"]: item for item in state["workers"]}
+    worker_id = marker["worker_id"]
+    if worker_id not in registry:
+        raise StateError(f"Pending reassignment names unknown Worker: {worker_id}")
+    entry = registry[worker_id]
+    worker_dir = checked_relative_path(runtime, entry["task_path"], "worker.task_path").parent
+    if marker_path.resolve().parent != worker_dir.resolve():
+        raise StateError(f"Pending reassignment marker is in the wrong Worker directory: {marker_path}")
+
+    for name in ("TASK.md", "STATUS.json", "BLOCKER.md"):
+        current = (worker_dir / name).read_text(encoding="utf-8")
+        if current not in {marker["old_files"][name], marker["new_files"][name]}:
+            raise StateError(
+                f"Pending reassignment conflicts with newer {worker_id}/{name}; "
+                "refusing to overwrite it"
+            )
+
+    write_assignment_archive(
+        worker_dir, marker["archived_revision"], marker["old_files"]
+    )
+    for name, content in marker["new_files"].items():
+        atomic_write_text(worker_dir / name, content)
+
+    entry["write_scope"] = marker["write_scope"]
+    entry["depends_on"] = marker["depends_on"]
+    state["phase"] = "execution"
+    state["status"] = "active"
+    state["current_milestone"] = marker["milestone"]
+    state["next_action"] = {
+        "actor": worker_id,
+        "instruction": f"Continue {worker_id} with assignment revision {marker['new_revision']}.",
+    }
+    if marker["invalidate_review"]:
+        state["review"]["reviewer_id"] = None
+    save_state(runtime, state)
+    marker_path.unlink()
+
+
+def recover_pending_reassignments(runtime: Path) -> None:
+    workers_dir = runtime / "workers"
+    if not workers_dir.is_dir() or not state_path(runtime).is_file():
+        return
+    for marker_path in sorted(workers_dir.glob(f"*/{REASSIGNMENT_MARKER}")):
+        recover_reassignment(runtime, marker_path)
 
 
 def command_reassign_worker(args: argparse.Namespace) -> int:
@@ -734,23 +1055,34 @@ def command_reassign_worker(args: argparse.Namespace) -> int:
             runtime, other["status_path"], f"{other_id}.status_path"
         )
         other_status = read_json(other_status_path)["status"]
-        if other_status == "active" and args.worker_id in other["depends_on"]:
+        if other_status in ACTIVE_WORKER_STATUSES and args.worker_id in other["depends_on"]:
             raise StateError(
-                f"Cannot reassign {args.worker_id}; active dependent {other_id} "
+                f"Cannot reassign {args.worker_id}; nonterminal dependent {other_id} "
                 "still requires its completed assignment"
             )
         if other_status not in ACTIVE_WORKER_STATUSES:
             continue
-        overlap = sorted(set(scopes) & set(other["write_scope"]))
+        overlap = sorted(
+            f"{scope} <-> {other_scope}"
+            for scope in scopes
+            for other_scope in other["write_scope"]
+            if scopes_overlap(scope, other_scope)
+        )
         if overlap:
             raise StateError(
                 f"Write scope overlaps with {other_id}: {', '.join(overlap)}"
             )
 
-    archived_revision = archive_worker_assignment(worker_dir)
+    review_status = read_json(runtime / "review" / "STATUS.json")
+    if (
+        state["review"]["required"]
+        and state["review"]["reviewer_id"] is not None
+        and review_status["status"] != "completed"
+    ):
+        raise StateError("Cannot return to execution while the assigned review is unfinished")
+
+    archived_revision = max(archived_assignment_revisions(worker_dir), default=0) + 1
     new_revision = archived_revision + 1
-    atomic_write_text(worker_dir / "TASK.md", build_worker_task(args, new_revision))
-    atomic_write_text(worker_dir / "BLOCKER.md", read_template_text("blocker.md"))
     new_status = read_template_json("worker-status.json")
     new_status.update(
         {
@@ -759,18 +1091,29 @@ def command_reassign_worker(args: argparse.Namespace) -> int:
             "last_updated": utc_now(),
         }
     )
-    atomic_write_json(status_path_value, new_status)
-
-    entry["write_scope"] = scopes
-    entry["depends_on"] = list(args.depends_on)
-    state["phase"] = "execution"
-    state["status"] = "active"
-    state["current_milestone"] = require_nonempty(args.milestone, "milestone")
-    state["next_action"] = {
-        "actor": args.worker_id,
-        "instruction": f"Continue {args.worker_id} with assignment revision {new_revision}.",
+    marker = {
+        "schema_version": SCHEMA_VERSION,
+        "worker_id": args.worker_id,
+        "archived_revision": archived_revision,
+        "new_revision": new_revision,
+        "old_files": {
+            name: (worker_dir / name).read_text(encoding="utf-8")
+            for name in ("TASK.md", "STATUS.json", "BLOCKER.md")
+        },
+        "new_files": {
+            "TASK.md": build_worker_task(args, new_revision),
+            "STATUS.json": json.dumps(new_status, indent=2, ensure_ascii=False) + "\n",
+            "BLOCKER.md": read_template_text("blocker.md"),
+        },
+        "write_scope": scopes,
+        "depends_on": list(args.depends_on),
+        "milestone": require_nonempty(args.milestone, "milestone"),
+        "invalidate_review": bool(
+            state["review"]["required"] and state["review"]["reviewer_id"] is not None
+        ),
     }
-    save_state(runtime, state)
+    atomic_write_json(worker_dir / REASSIGNMENT_MARKER, marker)
+    recover_reassignment(runtime, worker_dir / REASSIGNMENT_MARKER)
     assert_valid(runtime)
     print(
         f"PROJECT_LEAD reassigned {args.worker_id}: completed -> ready "
@@ -794,6 +1137,8 @@ def command_set_worker_status(args: argparse.Namespace) -> int:
     runtime = runtime_dir(root)
     assert_valid(runtime)
     state = load_state(runtime)
+    if state["status"] == "complete":
+        raise StateError("Cannot update Worker status in a completed project; reopen it first")
     registry = {item["id"]: item for item in state["workers"]}
     if args.worker_id not in registry:
         raise StateError(f"Unknown Worker: {args.worker_id}")
@@ -804,13 +1149,13 @@ def command_set_worker_status(args: argparse.Namespace) -> int:
     old_status = status["status"]
     if args.status != old_status and args.status not in WORKER_TRANSITIONS[old_status]:
         raise StateError(f"Invalid Worker transition: {old_status} -> {args.status}")
-    if args.status == "active" and old_status != "active":
+    if args.status in {"active", "completed"} and args.status != old_status:
         for dependency in registry[args.worker_id]["depends_on"]:
             dependency_status_path = checked_relative_path(
                 runtime, registry[dependency]["status_path"], "dependency.status_path"
             )
             dependency_status = read_json(dependency_status_path)["status"]
-            if dependency_status not in {"completed", "inactive"}:
+            if dependency_status != "completed":
                 raise StateError(
                     f"Cannot activate {args.worker_id}; dependency {dependency} "
                     f"is {dependency_status}"
@@ -823,9 +1168,111 @@ def command_set_worker_status(args: argparse.Namespace) -> int:
     if args.verification is not None:
         status["verification"] = args.verification
     status["last_updated"] = utc_now()
+    previous_status_text = status_path_value.read_text(encoding="utf-8")
     atomic_write_json(status_path_value, status)
-    assert_valid(runtime)
+    try:
+        assert_valid(runtime)
+    except Exception:
+        atomic_write_text(status_path_value, previous_status_text)
+        raise
     print(f"Updated {args.worker_id}: {old_status} -> {args.status}")
+    return 0
+
+
+def completion_history_revisions(runtime: Path) -> list[int]:
+    history_dir = runtime / "history"
+    if not history_dir.is_dir():
+        return []
+    return [
+        int(match.group(1))
+        for path in history_dir.iterdir()
+        if path.is_dir() and (match := COMPLETION_HISTORY_RE.fullmatch(path.name)) is not None
+    ]
+
+
+def archive_project_completion(runtime: Path, reason: str) -> int:
+    state = load_state(runtime)
+    current_state_text = state_path(runtime).read_text(encoding="utf-8")
+    history_dir = runtime / "history"
+    history_dir.mkdir(exist_ok=True)
+    revisions = completion_history_revisions(runtime)
+    if revisions:
+        latest = history_dir / f"completion-{max(revisions):04d}"
+        archived_state = latest / "STATE.json"
+        if archived_state.is_file() and archived_state.read_text(encoding="utf-8") == current_state_text:
+            return max(revisions)
+
+    revision = max(revisions, default=0) + 1
+    destination = history_dir / f"completion-{revision:04d}"
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".completion-{revision:04d}-", dir=history_dir)
+    )
+    try:
+        for name in ("STATE.json", "PLAN.md", "OWNER_DIRECTIVES.md", "HANDOFF.md"):
+            write_new_text(temporary / name, (runtime / name).read_text(encoding="utf-8"))
+        for worker in state["workers"]:
+            task = checked_relative_path(runtime, worker["task_path"], "worker.task_path")
+            status = checked_relative_path(runtime, worker["status_path"], "worker.status_path")
+            snapshot_worker_dir = temporary / task.parent.relative_to(runtime)
+            write_new_text(
+                temporary / task.relative_to(runtime), task.read_text(encoding="utf-8")
+            )
+            write_new_text(
+                temporary / status.relative_to(runtime), status.read_text(encoding="utf-8")
+            )
+            write_new_text(
+                snapshot_worker_dir / "BLOCKER.md",
+                (task.parent / "BLOCKER.md").read_text(encoding="utf-8"),
+            )
+        for key in ("task_path", "status_path", "report_path"):
+            source = checked_relative_path(runtime, state["review"][key], f"review.{key}")
+            write_new_text(
+                temporary / source.relative_to(runtime), source.read_text(encoding="utf-8")
+            )
+        write_new_json(
+            temporary / "REOPEN.json",
+            {
+                "schema_version": SCHEMA_VERSION,
+                "reopened_at": utc_now(),
+                "reason": reason,
+            },
+        )
+        os.replace(temporary, destination)
+        for stale in history_dir.glob(f".completion-{revision:04d}-*"):
+            if stale.is_dir():
+                shutil.rmtree(stale)
+    except Exception:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        raise
+    return revision
+
+
+def command_reopen_project(args: argparse.Namespace) -> int:
+    root = project_root(args.project_root)
+    runtime = runtime_dir(root)
+    assert_valid(runtime)
+    state = load_state(runtime)
+    if state["phase"] != "complete" or state["status"] != "complete":
+        raise StateError("Only a complete/complete project can be reopened")
+    reason = require_nonempty(args.reason, "reason")
+    milestone = require_nonempty(args.milestone, "milestone")
+    revision = archive_project_completion(runtime, reason)
+
+    state["phase"] = "planning"
+    state["status"] = "active"
+    state["current_milestone"] = milestone
+    state["review"].update({"required": False, "level": "none", "reviewer_id": None})
+    state["next_action"] = {
+        "actor": "project-lead",
+        "instruction": "Interpret the actionable Owner request and reassign a suitable completed Worker.",
+    }
+    save_state(runtime, state)
+    assert_valid(runtime)
+    print(
+        f"PROJECT_LEAD reopened project: complete -> planning/active "
+        f"(archived completion {revision})"
+    )
     return 0
 
 
@@ -843,11 +1290,38 @@ PROJECT_STATUS_TRANSITIONS = {
 }
 
 
+def require_completion_ready(runtime: Path, state: dict[str, Any]) -> None:
+    unfinished: list[str] = []
+    for worker in state["workers"]:
+        status_path_value = checked_relative_path(
+            runtime, worker["status_path"], "worker.status_path"
+        )
+        status = read_json(status_path_value)["status"]
+        if status not in {"completed", "inactive"}:
+            unfinished.append(f"{worker['id']}={status}")
+    if unfinished:
+        raise StateError(
+            "Cannot complete project; unfinished Workers: " + ", ".join(unfinished)
+        )
+    if pending_owner_events(runtime):
+        raise StateError("Cannot complete project while Owner feedback is pending")
+    if state["review"]["required"]:
+        review_status = read_json(runtime / "review" / "STATUS.json")
+        if (
+            state["review"]["reviewer_id"] is None
+            or review_status["status"] != "completed"
+            or review_status["reviewer_id"] != state["review"]["reviewer_id"]
+        ):
+            raise StateError("Cannot complete project; required review is unfinished or stale")
+
+
 def command_set_project(args: argparse.Namespace) -> int:
     root = project_root(args.project_root)
     runtime = runtime_dir(root)
     assert_valid(runtime)
     state = load_state(runtime)
+    if state["status"] == "complete":
+        raise StateError("Completed project state is frozen; use reopen-project for actionable work")
     phase = args.phase or state["phase"]
     status = args.status or state["status"]
     if phase not in PHASE_TRANSITIONS[state["phase"]]:
@@ -856,6 +1330,12 @@ def command_set_project(args: argparse.Namespace) -> int:
         raise StateError(f"Invalid project status transition: {state['status']} -> {status}")
     if (phase == "complete") != (status == "complete"):
         raise StateError("phase and status must both be complete or both be non-complete")
+    if phase == "review" and (
+        not state["review"]["required"] or state["review"]["reviewer_id"] is None
+    ):
+        raise StateError("Cannot enter review phase without an assigned review")
+    if phase == "complete":
+        require_completion_ready(runtime, state)
     state["phase"] = phase
     state["status"] = status
     if args.milestone:
@@ -863,14 +1343,152 @@ def command_set_project(args: argparse.Namespace) -> int:
     if args.next_actor or args.next_action:
         if not (args.next_actor and args.next_action):
             raise StateError("--next-actor and --next-action must be supplied together")
+        if phase == "complete" and args.next_actor.upper() != "OWNER":
+            raise StateError("A completed project's next actor must be OWNER")
         state["next_action"] = {
             "actor": require_nonempty(args.next_actor, "next-actor"),
             "instruction": require_nonempty(args.next_action, "next-action"),
         }
+    elif phase == "complete":
+        state["next_action"] = {
+            "actor": "OWNER",
+            "instruction": "Project complete; answer read-only questions or explicitly reopen for actionable work.",
+        }
+    previous_state_text = state_path(runtime).read_text(encoding="utf-8")
     save_state(runtime, state)
-    assert_valid(runtime)
+    try:
+        assert_valid(runtime)
+    except Exception:
+        atomic_write_text(state_path(runtime), previous_state_text)
+        raise
     print(f"Project is {phase}/{status}")
     return 0
+
+
+def review_history_revisions(runtime: Path) -> list[int]:
+    history_dir = runtime / "review" / "history"
+    if not history_dir.is_dir():
+        return []
+    return [
+        int(match.group(1))
+        for path in history_dir.iterdir()
+        if path.is_dir() and (match := REVIEW_HISTORY_RE.fullmatch(path.name)) is not None
+    ]
+
+
+def write_review_archive(
+    runtime: Path, revision: int, files: dict[str, str]
+) -> None:
+    review_dir = runtime / "review"
+    history_dir = review_dir / "history"
+    history_dir.mkdir(exist_ok=True)
+    destination = history_dir / f"review-{revision:04d}"
+    if destination.exists():
+        for name, content in files.items():
+            if (destination / name).read_text(encoding="utf-8") != content:
+                raise StateError(f"Existing review archive conflicts: {destination}")
+        for stale in history_dir.glob(f".review-{revision:04d}-*"):
+            if stale.is_dir():
+                shutil.rmtree(stale)
+        return
+    temporary = Path(tempfile.mkdtemp(prefix=f".review-{revision:04d}-", dir=history_dir))
+    try:
+        for name, content in files.items():
+            write_new_text(temporary / name, content)
+        os.replace(temporary, destination)
+        for stale in history_dir.glob(f".review-{revision:04d}-*"):
+            if stale.is_dir():
+                shutil.rmtree(stale)
+    except Exception:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        raise
+
+
+def validate_review_assignment_marker(value: dict[str, Any], path: Path) -> None:
+    required = {
+        "schema_version",
+        "reviewer_id",
+        "level",
+        "archive_revision",
+        "old_files",
+        "new_files",
+    }
+    if set(value) != required or value.get("schema_version") != SCHEMA_VERSION:
+        raise StateError(f"Invalid pending review marker: {path}")
+    if not isinstance(value.get("reviewer_id"), str) or not REVIEWER_ID_RE.fullmatch(
+        value["reviewer_id"]
+    ):
+        raise StateError(f"Invalid reviewer in pending review marker: {path}")
+    if value.get("level") not in {"balanced", "strong"}:
+        raise StateError(f"Invalid level in pending review marker: {path}")
+    archive_revision = value.get("archive_revision")
+    if archive_revision is not None and (
+        not isinstance(archive_revision, int) or archive_revision < 1
+    ):
+        raise StateError(f"Invalid archive revision in pending review marker: {path}")
+    for key in ("old_files", "new_files"):
+        files = value.get(key)
+        if not isinstance(files, dict) or set(files) != {"TASK.md", "STATUS.json", "REPORT.md"}:
+            raise StateError(f"Invalid {key} in pending review marker: {path}")
+        if not all(isinstance(content, str) for content in files.values()):
+            raise StateError(f"Invalid {key} content in pending review marker: {path}")
+    try:
+        old_status = json.loads(value["old_files"]["STATUS.json"])
+        new_status = json.loads(value["new_files"]["STATUS.json"])
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise StateError(f"Invalid status JSON in pending review marker: {path}") from exc
+    if not isinstance(old_status, dict) or not isinstance(new_status, dict):
+        raise StateError(f"Invalid status object in pending review marker: {path}")
+    if value["archive_revision"] is not None and old_status.get("status") != "completed":
+        raise StateError(f"Pending review archive is not completed: {path}")
+    if validate_review_status(new_status, path) or (
+        new_status.get("reviewer_id") != value["reviewer_id"]
+        or new_status.get("status") != "ready"
+    ):
+        raise StateError(f"Pending review does not publish the expected ready status: {path}")
+
+
+def recover_review_assignment(runtime: Path, marker_path: Path) -> None:
+    marker = read_json(marker_path)
+    validate_review_assignment_marker(marker, marker_path)
+    review_dir = runtime / "review"
+    for name in ("TASK.md", "STATUS.json", "REPORT.md"):
+        current = (review_dir / name).read_text(encoding="utf-8")
+        if current not in {marker["old_files"][name], marker["new_files"][name]}:
+            raise StateError(
+                f"Pending review assignment conflicts with newer review/{name}; "
+                "refusing to overwrite it"
+            )
+    if marker["archive_revision"] is not None:
+        write_review_archive(
+            runtime, marker["archive_revision"], marker["old_files"]
+        )
+    for name, content in marker["new_files"].items():
+        atomic_write_text(review_dir / name, content)
+
+    state = load_state(runtime)
+    state["review"].update(
+        {
+            "required": True,
+            "level": marker["level"],
+            "reviewer_id": marker["reviewer_id"],
+        }
+    )
+    state["phase"] = "review"
+    state["status"] = "active"
+    state["next_action"] = {
+        "actor": marker["reviewer_id"],
+        "instruction": f"Continue {marker['reviewer_id']} and complete the assigned review.",
+    }
+    save_state(runtime, state)
+    marker_path.unlink()
+
+
+def recover_pending_review_assignment(runtime: Path) -> None:
+    marker_path = runtime / "review" / REVIEW_ASSIGNMENT_MARKER
+    if marker_path.is_file():
+        recover_review_assignment(runtime, marker_path)
 
 
 def command_assign_review(args: argparse.Namespace) -> int:
@@ -885,11 +1503,25 @@ def command_assign_review(args: argparse.Namespace) -> int:
     if state["status"] == "complete":
         raise StateError("Cannot assign review to a completed project")
     current_status = read_json(runtime / "review" / "STATUS.json")
-    if state["review"]["required"] and current_status["status"] not in {
-        "completed",
-        "not-requested",
-    }:
+    if (
+        state["review"]["required"]
+        and state["review"]["reviewer_id"] is not None
+        and current_status["status"] not in {"completed", "not-requested"}
+    ):
         raise StateError("A review assignment is already active")
+    unfinished_workers = []
+    for worker in state["workers"]:
+        worker_status_path = checked_relative_path(
+            runtime, worker["status_path"], "worker.status_path"
+        )
+        worker_status = read_json(worker_status_path)["status"]
+        if worker_status not in {"completed", "inactive"}:
+            unfinished_workers.append(f"{worker['id']}={worker_status}")
+    if unfinished_workers:
+        raise StateError(
+            "Cannot assign review while Workers are unfinished: "
+            + ", ".join(unfinished_workers)
+        )
     task = (
         f"# Review Task: {args.reviewer_id}\n\n"
         f"## Objective\n\n{require_nonempty(args.objective, 'objective')}\n\n"
@@ -897,8 +1529,6 @@ def command_assign_review(args: argparse.Namespace) -> int:
         f"## Scope\n\n{markdown_list(args.scope)}\n\n"
         f"## Completion criteria\n\n{markdown_list(args.completion_criterion)}\n"
     )
-    atomic_write_text(runtime / "review" / "TASK.md", task)
-    atomic_write_text(runtime / "review" / "REPORT.md", read_template_text("review-report.md"))
     review_status = read_template_json("review-status.json")
     review_status.update(
         {
@@ -908,21 +1538,30 @@ def command_assign_review(args: argparse.Namespace) -> int:
             "last_updated": utc_now(),
         }
     )
-    atomic_write_json(runtime / "review" / "STATUS.json", review_status)
-    state["review"].update(
-        {
-            "required": True,
-            "level": args.level,
-            "reviewer_id": args.reviewer_id,
-        }
-    )
-    state["phase"] = "review"
-    state["status"] = "active"
-    state["next_action"] = {
-        "actor": args.reviewer_id,
-        "instruction": f"Continue {args.reviewer_id} and complete the assigned review.",
+    review_dir = runtime / "review"
+    old_files = {
+        name: (review_dir / name).read_text(encoding="utf-8")
+        for name in ("TASK.md", "STATUS.json", "REPORT.md")
     }
-    save_state(runtime, state)
+    marker = {
+        "schema_version": SCHEMA_VERSION,
+        "reviewer_id": args.reviewer_id,
+        "level": args.level,
+        "archive_revision": (
+            max(review_history_revisions(runtime), default=0) + 1
+            if current_status["status"] == "completed"
+            else None
+        ),
+        "old_files": old_files,
+        "new_files": {
+            "TASK.md": task,
+            "STATUS.json": json.dumps(review_status, indent=2, ensure_ascii=False) + "\n",
+            "REPORT.md": read_template_text("review-report.md"),
+        },
+    }
+    marker_path = review_dir / REVIEW_ASSIGNMENT_MARKER
+    atomic_write_json(marker_path, marker)
+    recover_review_assignment(runtime, marker_path)
     assert_valid(runtime)
     print(f"Assigned {args.reviewer_id} ({args.level})")
     return 0
@@ -933,7 +1572,7 @@ REVIEW_TRANSITIONS = {
     "ready": {"active", "blocked", "completed"},
     "active": {"blocked", "completed"},
     "blocked": {"active", "completed"},
-    "completed": {"ready"},
+    "completed": set(),
 }
 
 
@@ -941,6 +1580,11 @@ def command_set_review_status(args: argparse.Namespace) -> int:
     root = project_root(args.project_root)
     runtime = runtime_dir(root)
     assert_valid(runtime)
+    state = load_state(runtime)
+    if state["status"] == "complete":
+        raise StateError("Cannot update review status in a completed project; reopen it first")
+    if not state["review"]["required"] or state["review"]["reviewer_id"] is None:
+        raise StateError("No review assignment is active")
     path = runtime / "review" / "STATUS.json"
     status = read_json(path)
     if status["reviewer_id"] != args.reviewer_id:
@@ -953,8 +1597,13 @@ def command_set_review_status(args: argparse.Namespace) -> int:
     if args.verification is not None:
         status["verification"] = args.verification
     status["last_updated"] = utc_now()
+    previous_status_text = path.read_text(encoding="utf-8")
     atomic_write_json(path, status)
-    assert_valid(runtime)
+    try:
+        assert_valid(runtime)
+    except Exception:
+        atomic_write_text(path, previous_status_text)
+        raise
     print(f"Updated review: {old_status} -> {args.status}")
     return 0
 
@@ -966,6 +1615,11 @@ def command_record_owner_feedback(args: argparse.Namespace) -> int:
     if not WORKER_ID_RE.fullmatch(args.worker_id):
         raise StateError("worker-id must match worker-N")
     state = load_state(runtime)
+    if state["status"] == "complete":
+        raise StateError(
+            "Completed project feedback must be classified by PROJECT_LEAD: "
+            "answer read-only requests without mutation or use reopen-project for actionable work"
+        )
     if args.worker_id not in {item["id"] for item in state["workers"]}:
         raise StateError(f"Unknown Worker: {args.worker_id}")
     message = require_nonempty(args.message, "message")
@@ -990,11 +1644,59 @@ def command_record_owner_feedback(args: argparse.Namespace) -> int:
     return 0
 
 
+def owner_event_frontmatter(content: str, path: Path) -> tuple[re.Match[str], str]:
+    frontmatter = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", content, re.DOTALL)
+    if frontmatter is None:
+        raise StateError(f"Owner feedback event has no valid frontmatter: {path}")
+    status = re.search(
+        r"(?m)^status:\s*[\"']?([a-z-]+)[\"']?\s*$", frontmatter.group(1)
+    )
+    if status is None:
+        raise StateError(f"Owner feedback event has no valid status: {path}")
+    return frontmatter, status.group(1)
+
+
+def command_resolve_owner_feedback(args: argparse.Namespace) -> int:
+    root = project_root(args.project_root)
+    runtime = runtime_dir(root)
+    assert_valid(runtime)
+    if not OWNER_EVENT_ID_RE.fullmatch(args.event_id):
+        raise StateError("event-id contains invalid characters")
+    resolution = require_nonempty(args.resolution, "resolution")
+    path = runtime / "inbox" / "owner" / f"{args.event_id}.md"
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise StateError(f"Unknown Owner feedback event: {args.event_id}") from exc
+    frontmatter, status = owner_event_frontmatter(content, path)
+    if status == "resolved":
+        print(f"Owner feedback already resolved; no files changed: {args.event_id}")
+        return 0
+    if status != "pending":
+        raise StateError(f"Owner feedback event is not pending: {args.event_id}")
+    updated_frontmatter = re.sub(
+        r"(?m)^status:\s*[\"']?pending[\"']?\s*$",
+        'status: "resolved"',
+        frontmatter.group(0),
+        count=1,
+    )
+    updated = updated_frontmatter + content[frontmatter.end() :]
+    updated = (
+        updated.rstrip()
+        + "\n\n## Project Lead Resolution\n\n"
+        + f"Resolved at: {utc_now()}\n\n{resolution}\n"
+    )
+    atomic_write_text(path, updated)
+    print(f"Resolved Owner feedback: {args.event_id}")
+    return 0
+
+
 def pending_owner_events(runtime: Path) -> list[Path]:
     result: list[Path] = []
     for path in sorted((runtime / "inbox" / "owner").glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        if re.search(r"(?m)^status:\s*[\"']?pending[\"']?\s*$", text):
+        content = path.read_text(encoding="utf-8")
+        _, status = owner_event_frontmatter(content, path)
+        if status == "pending":
             result.append(path)
     return result
 
@@ -1016,6 +1718,7 @@ def status_snapshot(runtime: Path) -> dict[str, Any]:
             }
         )
     review_status = read_json(runtime / "review" / "STATUS.json")
+    review_assigned = state["review"]["reviewer_id"] is not None
     return {
         "project_id": state["project_id"],
         "phase": state["phase"],
@@ -1025,10 +1728,15 @@ def status_snapshot(runtime: Path) -> dict[str, Any]:
         "review": {
             "required": state["review"]["required"],
             "level": state["review"]["level"],
-            "reviewer_id": review_status["reviewer_id"],
-            "status": review_status["status"],
-            "summary": review_status["summary"],
+            "reviewer_id": state["review"]["reviewer_id"],
+            "status": review_status["status"] if review_assigned else "not-assigned",
+            "summary": (
+                review_status["summary"]
+                if review_assigned
+                else ("Review is required but not assigned." if state["review"]["required"] else "")
+            ),
         },
+        "completion_history": len(completion_history_revisions(runtime)),
         "pending_owner_feedback": len(pending_owner_events(runtime)),
         "next_action": state["next_action"],
         "last_updated": state["last_updated"],
@@ -1059,6 +1767,7 @@ def render_status(snapshot: dict[str, Any]) -> str:
         )
     )
     lines.append(f"Pending Owner feedback: {snapshot['pending_owner_feedback']}")
+    lines.append(f"Prior completions: {snapshot['completion_history']}")
     next_action = snapshot["next_action"]
     lines.append(f"Next: {next_action['actor']} — {next_action['instruction']}")
     return "\n".join(lines)
@@ -1152,6 +1861,15 @@ def build_parser() -> argparse.ArgumentParser:
     project_parser.add_argument("--next-action")
     project_parser.set_defaults(func=command_set_project)
 
+    reopen_parser = subparsers.add_parser(
+        "reopen-project",
+        help="PROJECT_LEAD only: archive a completed project and return it to planning",
+    )
+    common_project_root(reopen_parser)
+    reopen_parser.add_argument("--reason", required=True)
+    reopen_parser.add_argument("--milestone", required=True)
+    reopen_parser.set_defaults(func=command_reopen_project)
+
     review_parser = subparsers.add_parser("assign-review", help="Create a bounded review assignment")
     common_project_root(review_parser)
     review_parser.add_argument("--reviewer-id", required=True)
@@ -1177,6 +1895,15 @@ def build_parser() -> argparse.ArgumentParser:
     feedback_parser.add_argument("--message", required=True)
     feedback_parser.set_defaults(func=command_record_owner_feedback)
 
+    resolve_feedback_parser = subparsers.add_parser(
+        "resolve-owner-feedback",
+        help="PROJECT_LEAD only: mark one preserved Owner feedback event resolved",
+    )
+    common_project_root(resolve_feedback_parser)
+    resolve_feedback_parser.add_argument("--event-id", required=True)
+    resolve_feedback_parser.add_argument("--resolution", required=True)
+    resolve_feedback_parser.set_defaults(func=command_resolve_owner_feedback)
+
     validate_parser = subparsers.add_parser("validate", help="Validate runtime structure and invariants")
     common_project_root(validate_parser)
     validate_parser.set_defaults(func=command_validate)
@@ -1192,6 +1919,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command != "init":
+            runtime = runtime_dir(project_root(args.project_root))
+            recover_pending_review_assignment(runtime)
+            recover_pending_reassignments(runtime)
         return int(args.func(args))
     except StateError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

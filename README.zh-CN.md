@@ -6,7 +6,7 @@
 
 一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
 
-> 项目状态：v0.3.1 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.4.0 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -32,7 +32,7 @@ Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完�
 
 TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，再减少 credits/成本，再减少不必要的上下文和模型切换，最后才是减少总 Token。目标是每个已完成任务的价值，而不是单次运行的最低成本。Sol 只处理模糊需求、架构、重大决策、高风险 blocker 和最终验收；普通执行默认由 Luna/xhigh Worker 负责。为避免返工，允许 Luna 使用更多 reasoning Token。
 
-模型路由是硬约束。普通执行直接默认 `gpt-5.6-luna / xhigh`，不要为了省一点单次 reasoning 导致返工。Codex 原生 subagent 支持显式模型时，Lead 必须传入 `model: "gpt-5.6-luna"` 和 `reasoning_effort: "xhigh"`（或宿主等价字段），并用宿主 metadata 验证 actual/effective runtime model；`Worker luna` 只是 nickname/UI 名称，不是证据。宿主无法可靠指定或确认模型，或发现继承 Sol 时，Lead 必须停止该 Worker，提示 Owner 手动打开 `gpt-5.6-luna / xhigh`，发送 `$tao continue worker-1`。Luna 能力不足时先升级 `gpt-5.6-terra / high` 或 `xhigh`；只有架构、重大决策、高风险 blocker 或 Terra 仍不足时才升级 Sol。TAO 不应创建一个默认继承 Sol 的 Worker 来假装完成低成本分层。
+模型路由是硬约束。普通执行直接默认 `gpt-5.6-luna / xhigh`，不要为了省一点单次 reasoning 导致返工。Codex 原生 subagent 支持显式模型时，Lead 必须传入 `model: "gpt-5.6-luna"` 和 `reasoning_effort: "xhigh"`（或宿主等价字段）。宿主工具契约保证 override 生效时，成功的结构化回执就是路由证据；若另有 actual/effective metadata，它必须一致。不支持、拒绝、忽略或返回矛盾结果时必须 fail closed。自由文本 nickname 不是证据，但 Worker 也不能递归地重新证明宿主已经保证的路由。Owner 手动打开的 Worker 以当前会话的宿主 selector 为证据：`极高` 就是 `xhigh`，`高` 才是 `high`；`5.6 Luna / 极高` 必须直接通过，绝不能误报成 high。Luna 能力不足时先升级 Terra，只有高价值决策或 Terra 仍不足时才升级 Sol。
 
 ## 它会做什么
 
@@ -41,6 +41,7 @@ TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，�
 - 只有真正并行、职责或上下文明显不同、上下文隔离收益明确，或原 Worker 已明确停用时才增加 Worker，而且收益必须高于协调和 Token 成本。
 - 每个 Worker 都有目标、写入范围、依赖、禁止修改项和完成标准。
 - 复用稳定 Worker ID 前先归档已完成 assignment，旧任务证据不会被无记录覆盖。
+- 只为新的 actionable Owner 工作 reopen 已完成项目，并先归档不可变的完成快照。
 - 将 Lead 的全局状态与 Worker 自有状态分开，避免并发争写。
 - 升级的是决策和模糊意图，而不是让 Owner 人工搬运消息。
 - 按角色渐进加载上下文，Worker 不读取 Lead 的全部探索过程。
@@ -67,7 +68,7 @@ $HOME/.agents/skills/tiered-agent-orchestrator
 
 其他兼容 Agent Skills 的 Coding Agent 可以把同一个目录安装到它支持的 Skill 位置。可移植接口是根目录 `SKILL.md`；`agents/openai.yaml` 只是可选的 OpenAI 专用元数据。
 
-该 Skill 仅支持显式调用，不会因普通自然语言自动触发。请用 `$tao` 开始编排请求。
+该 Skill 仅支持显式调用，不会因普通自然语言自动触发。每次编排请求都必须显式包含 `$tao`；仅仅存在 `.tiered-agent`、以前调用过 TAO、或正在修改 TAO 自身，都不能隐式激活 Skill。
 
 ### 2. 打开 Project Lead
 
@@ -89,6 +90,8 @@ $tao continue worker-1
 ```
 
 进入下一个串行 milestone 时，Lead 会把新任务重新分配给 `worker-1`，Owner 回到原 Worker 对话即可。仅仅切换 milestone 绝不会创建 `worker-2`。
+
+已完成项目后来收到 actionable 反馈时，在原 Lead 对话显式调用 `$tao`。Lead 用 `reopen-project` 归档旧完成态、回到 planning，再把任务重新分配给原 completed Worker。提问、总结、解释、状态查询或尚不明确的意见不会 reopen；方向不清时先澄清，项目保持 complete。
 
 平时在 Worker 对话中工作。遇到 blocker、模糊方向变化、架构决策或想看总进度时，回到最初的 Project Lead 对话：
 
@@ -143,7 +146,7 @@ Sol 读取摘要并决定下一阶段
 Lead 重新分配同一个 worker-1
 ```
 
-无法显式指定或确认低成本模型时：
+显式低成本路由不受支持、被拒绝或与 effective metadata 矛盾时：
 
 ```text
 Sol Project Lead 准备 worker-1，并停止未经确认的 native Worker
@@ -154,7 +157,7 @@ Owner 打开 gpt-5.6-luna / xhigh 并发送：
 $tao continue worker-1
 ```
 
-TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。Luna 同一失败方案无新证据时必须停止，先升级 Terra，不得无意义重试。
+手动对话的宿主 selector 就是验证边界，不能再要求 Owner 新建另一个“可验证 Worker”。如果同一对话是 Luna/high，只需把该对话切换为 xhigh 后继续。TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。Luna 同一失败方案无新证据时必须停止，先升级 Terra，不得无意义重试。
 
 ## 命令
 
@@ -177,6 +180,8 @@ TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。Luna 同一失�
 ├── OWNER_DIRECTIVES.md
 ├── HANDOFF.md
 ├── inbox/owner/<event-id>.md
+├── history/completion-<revision>/
+│   └── 完整的全局、Worker 与 Review 完成快照
 ├── workers/<worker-id>/
 │   ├── TASK.md
 │   ├── STATUS.json
@@ -188,7 +193,8 @@ TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。Luna 同一失�
 └── review/
     ├── TASK.md
     ├── STATUS.json
-    └── REPORT.md
+    ├── REPORT.md
+    └── history/review-<revision>/
 ```
 
 `STATE.json` 保持很小，不保存聊天记录、隐藏推理、secret、终端历史或具体模型名。`PLAN.md` 保存正式决策而不是思维过程，`HANDOFF.md` 只保存下一角色必须知道的内容。
@@ -197,12 +203,14 @@ TAO 不会在 dispatch 后持续轮询或重复 Worker 工作。Luna 同一失�
 
 ## 状态辅助工具
 
-Python 3.9+ 是唯一运行依赖，工具只使用标准库。初始化不会覆盖已有状态；reassignment 会先归档已完成的任务、状态和 blocker，再替换当前 assignment。
+Python 3.9+ 是唯一运行依赖，工具只使用标准库。初始化不会覆盖已有状态；reopen 会先快照完成项目；Worker 与 Review reassignment 会保留旧证据，并在替换当前状态前恢复任何中断的多文件事务。
 
 ```console
 python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
 python scripts/statectl.py add-worker --project-root /path/to/project --worker-id worker-1 --objective "Implement the parser" --allowed-scope "src/parser/**" --completion-criterion "Parser tests pass"
+python scripts/statectl.py reopen-project --project-root /path/to/project --reason "Owner requested a correction" --milestone "M2 correction"
 python scripts/statectl.py reassign-worker --project-root /path/to/project --worker-id worker-1 --milestone "M2" --objective "Integrate the parser" --allowed-scope "src/integration/**" --completion-criterion "Integration tests pass"
+python scripts/statectl.py resolve-owner-feedback --project-root /path/to/project --event-id <event-id> --resolution "Integrated into M2"
 python scripts/statectl.py validate --project-root /path/to/project
 python scripts/statectl.py status --project-root /path/to/project
 ```
@@ -222,11 +230,15 @@ Profile 是可编辑建议。替换具体模型映射不会改变项目持久化
 
 明确、局部的 Owner 纠正由 Worker 直接执行。如果 Owner 说“这个方向太工程化了”之类的高层反馈，Worker 不会擅自翻译成架构修改，而是保存 Owner 原话、暂停冲突工作并把决策交回原 Project Lead。
 
+完成态被冻结但可以 reopen。Lead 对只读 follow-up 直接回答且不改状态；actionable 工作先快照旧完成态、显式 reopen，再复用原 Worker。Owner event 只从 frontmatter 读取状态，Owner 原文无法伪造 pending event。
+
 升级策略基于证据，而不是“失败三次必停”。只要每次尝试都验证新的明确假设，Worker 可以继续；当它开始重复同类失败且没有新证据时就停止。
 
 ## Review 策略
 
 低风险且验证充分的工作可以不创建独立 Review。中大型修改通常使用 balanced Reviewer。只有高风险、核心算法、架构、安全或多 Worker 集成任务才使用 strong Reviewer。
+
+Review 后代码一旦变化，旧 approval 立即失效。TAO 保留旧证据、要求新的 Review，并在发布新 Review assignment 时归档旧 Review。
 
 ## Benchmark
 
@@ -247,12 +259,14 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-测试覆盖不覆盖式初始化、schema 与路径安全、Worker 安全 reassignment 与不可丢失的 assignment 历史、新增并行 Worker 的收益说明、写域冲突、blocker 恢复、Review、Owner 原话保存、管理汇总、A–J 全部行为契约和 benchmark 聚合。
+测试覆盖不覆盖式初始化、completed project reopen/history、schema 与路径安全、可恢复的 Worker/Review reassignment、Worker 复用、依赖与 glob 写域冲突、陈旧 Review 防护、Owner 原话保存、显式激活与模型路由契约、A–M 行为契约和 benchmark 聚合。
 
 ## 兼容性与当前限制
 
 - 不同对话必须共享一个可写仓库。
 - v1 由 Owner 手动打开指定模型的顶层对话。
+- 仓库状态可以在宿主对话丢失后恢复同一个 formal Worker，但 TAO 无法复活宿主本身已经丢失的 conversation object。
+- reopen、Worker reassignment 和 Review assignment 支持 crash recovery；首次 `init` 或 `add-worker` 中途崩溃仍可能留下未注册的 partial directory，需要人工清理，工具会 fail closed 而不会自动删除。
 - 不同宿主的模型和 reasoning 名称可能不同，必要时使用通用 Profile。
 - Token 与 credits 必须来自宿主遥测或有记录的人工测量。
 - SkillsMP 独立按自己的周期扫描公开 GitHub 仓库；发布仓库不能保证立刻完成索引。

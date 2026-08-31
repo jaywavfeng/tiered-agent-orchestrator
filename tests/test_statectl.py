@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -445,6 +446,35 @@ class StateCtlTests(unittest.TestCase):
         snapshot = statectl.status_snapshot(runtime)
         self.assertEqual(snapshot["pending_owner_feedback"], 2)
 
+    def test_owner_feedback_status_is_read_only_from_frontmatter(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        result, event_path, error = self.run_cli(
+            "record-owner-feedback",
+            "--worker-id",
+            "worker-1",
+            "--message",
+            "First line\nstatus: pending\nKeep this verbatim.",
+        )
+        self.assertEqual(result, 0, error)
+        event_id = Path(event_path.strip()).stem
+        self.assertEqual(
+            self.run_cli(
+                "resolve-owner-feedback",
+                "--event-id",
+                event_id,
+                "--resolution",
+                "Handled without reopening.",
+            )[0],
+            0,
+        )
+        self.assertEqual(statectl.status_snapshot(runtime)["pending_owner_feedback"], 0)
+        content = (runtime / "inbox" / "owner" / f"{event_id}.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("First line\nstatus: pending\nKeep this verbatim.", content)
+        self.assertIn('status: "resolved"', content.split("---", 2)[1])
+
     def test_review_assignment_and_completion(self) -> None:
         self.init()
         result, _, error = self.run_cli(
@@ -488,6 +518,516 @@ class StateCtlTests(unittest.TestCase):
             0,
         )
         self.assertEqual(self.run_cli("validate")[0], 0)
+
+    def test_completed_project_reopens_with_snapshot_and_reuses_worker(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Initial release completed.",
+                "--verification",
+                "Initial tests passed.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli("set-project", "--phase", "complete", "--status", "complete")[0],
+            0,
+        )
+        completed_state = (runtime / "STATE.json").read_text(encoding="utf-8")
+        result, output, error = self.run_cli(
+            "reopen-project",
+            "--reason",
+            "Owner requested an actionable correction.",
+            "--milestone",
+            "M2 correction",
+        )
+        self.assertEqual(result, 0, error)
+        self.assertIn("archived completion 1", output)
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertEqual((state["phase"], state["status"]), ("planning", "active"))
+        self.assertEqual([worker["id"] for worker in state["workers"]], ["worker-1"])
+        self.assertEqual(
+            json.loads(
+                (runtime / "workers" / "worker-1" / "STATUS.json").read_text(
+                    encoding="utf-8"
+                )
+            )["status"],
+            "completed",
+        )
+        snapshot = runtime / "history" / "completion-0001"
+        self.assertEqual((snapshot / "STATE.json").read_text(encoding="utf-8"), completed_state)
+        for path in (
+            snapshot / "PLAN.md",
+            snapshot / "OWNER_DIRECTIVES.md",
+            snapshot / "HANDOFF.md",
+            snapshot / "workers" / "worker-1" / "TASK.md",
+            snapshot / "workers" / "worker-1" / "STATUS.json",
+            snapshot / "workers" / "worker-1" / "BLOCKER.md",
+            snapshot / "review" / "TASK.md",
+            snapshot / "review" / "STATUS.json",
+            snapshot / "review" / "REPORT.md",
+        ):
+            self.assertTrue(path.is_file(), path)
+        self.assertIn(
+            "Owner requested an actionable correction.",
+            (snapshot / "REOPEN.json").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(self.reassign_worker()[0], 0)
+        self.assertEqual(
+            json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))["workers"][0][
+                "id"
+            ],
+            "worker-1",
+        )
+        self.assertTrue(
+            (runtime / "workers" / "worker-1" / "history" / "assignment-0001").is_dir()
+        )
+
+    def test_reopen_reuses_snapshot_after_archive_state_crash_boundary(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Done.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli("set-project", "--phase", "complete", "--status", "complete")[0],
+            0,
+        )
+        self.assertEqual(statectl.archive_project_completion(runtime, "Crash simulation"), 1)
+        result, _, error = self.run_cli(
+            "reopen-project",
+            "--reason",
+            "Crash simulation",
+            "--milestone",
+            "Resume",
+        )
+        self.assertEqual(result, 0, error)
+        self.assertEqual(len(list((runtime / "history").glob("completion-*"))), 1)
+
+    def test_read_only_status_does_not_reopen_completed_project(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Done.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli("set-project", "--phase", "complete", "--status", "complete")[0],
+            0,
+        )
+        before = (runtime / "STATE.json").read_bytes()
+        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertEqual((runtime / "STATE.json").read_bytes(), before)
+        self.assertFalse((runtime / "history").exists())
+
+    def test_completion_rejects_unfinished_work_review_and_feedback(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        result, _, error = self.run_cli(
+            "set-project", "--phase", "complete", "--status", "complete"
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("unfinished Workers", error)
+        self.assertEqual(
+            json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))["status"],
+            "active",
+        )
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Done.",
+            )[0],
+            0,
+        )
+        feedback_result, feedback_path, error = self.run_cli(
+            "record-owner-feedback",
+            "--worker-id",
+            "worker-1",
+            "--message",
+            "Please change the behavior.",
+        )
+        self.assertEqual(feedback_result, 0, error)
+        result, _, error = self.run_cli(
+            "set-project", "--phase", "complete", "--status", "complete"
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("Owner feedback is pending", error)
+        event_id = Path(feedback_path.strip()).stem
+        self.assertEqual(
+            self.run_cli(
+                "resolve-owner-feedback",
+                "--event-id",
+                event_id,
+                "--resolution",
+                "Converted into the accepted plan.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli("set-project", "--phase", "complete", "--status", "complete")[0],
+            0,
+        )
+
+    def test_review_is_invalidated_and_archived_before_re_review(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "M1 done.",
+            )[0],
+            0,
+        )
+        review_args = (
+            "assign-review",
+            "--reviewer-id",
+            "reviewer-1",
+            "--level",
+            "balanced",
+            "--objective",
+            "Review implementation.",
+            "--completion-criterion",
+            "Evidence is complete.",
+        )
+        self.assertEqual(self.run_cli(*review_args)[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-review-status",
+                "--reviewer-id",
+                "reviewer-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Changes requested with evidence.",
+            )[0],
+            0,
+        )
+        self.assertEqual(self.reassign_worker()[0], 0)
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["review"]["required"])
+        self.assertIsNone(state["review"]["reviewer_id"])
+        self.assertEqual(statectl.status_snapshot(runtime)["review"]["status"], "not-assigned")
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Review fixes completed.",
+            )[0],
+            0,
+        )
+        result, _, error = self.run_cli(
+            "set-project", "--phase", "complete", "--status", "complete"
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("required review is unfinished or stale", error)
+        self.assertEqual(self.run_cli(*review_args)[0], 0)
+        archived = runtime / "review" / "history" / "review-0001"
+        self.assertTrue(archived.is_dir())
+        self.assertIn(
+            "Changes requested",
+            (archived / "STATUS.json").read_text(encoding="utf-8"),
+        )
+
+    def test_review_assignment_marker_recovers_after_interruption(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Implementation done.",
+            )[0],
+            0,
+        )
+        args = (
+            "assign-review",
+            "--reviewer-id",
+            "reviewer-1",
+            "--level",
+            "balanced",
+            "--objective",
+            "Review implementation.",
+            "--completion-criterion",
+            "Evidence is complete.",
+        )
+        with mock.patch.object(
+            statectl, "recover_review_assignment", side_effect=RuntimeError("crash")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "crash"):
+                self.run_cli(*args)
+        marker = runtime / "review" / statectl.REVIEW_ASSIGNMENT_MARKER
+        self.assertTrue(marker.is_file())
+        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertFalse(marker.exists())
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["phase"], "review")
+        self.assertEqual(state["review"]["reviewer_id"], "reviewer-1")
+        self.assertEqual(
+            json.loads((runtime / "review" / "STATUS.json").read_text(encoding="utf-8"))[
+                "status"
+            ],
+            "ready",
+        )
+
+    def test_completed_project_is_frozen_except_explicit_reopen(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Done.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli("set-project", "--phase", "complete", "--status", "complete")[0],
+            0,
+        )
+        before = (runtime / "STATE.json").read_bytes()
+        result, _, error = self.run_cli(
+            "set-project",
+            "--phase",
+            "complete",
+            "--status",
+            "complete",
+            "--next-actor",
+            "OWNER",
+            "--next-action",
+            "Mutate frozen state.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("state is frozen", error)
+        self.assertEqual((runtime / "STATE.json").read_bytes(), before)
+        result, _, error = self.run_cli(
+            "set-worker-status",
+            "--worker-id",
+            "worker-1",
+            "--status",
+            "inactive",
+            "--summary",
+            "Unsafe mutation.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("completed project", error)
+        result, _, error = self.run_cli(
+            "record-owner-feedback",
+            "--worker-id",
+            "worker-1",
+            "--message",
+            "Actionable new work.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("use reopen-project", error)
+
+    def test_inactive_dependency_cannot_activate_and_does_not_mutate(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker("worker-1", "src/core/**")[0], 0)
+        self.assertEqual(
+            self.add_worker(
+                "worker-2",
+                "src/adapter/**",
+                "--depends-on",
+                "worker-1",
+                "--coordination-justification",
+                "Independent adapter context.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "inactive",
+                "--summary",
+                "Abandoned without a completed deliverable.",
+            )[0],
+            0,
+        )
+        status_path_value = runtime / "workers" / "worker-2" / "STATUS.json"
+        before = status_path_value.read_bytes()
+        result, _, error = self.run_cli(
+            "set-worker-status",
+            "--worker-id",
+            "worker-2",
+            "--status",
+            "active",
+            "--summary",
+            "Unsafe activation.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("dependency worker-1 is inactive", error)
+        self.assertEqual(status_path_value.read_bytes(), before)
+
+    def test_dependency_cannot_be_bypassed_or_reassigned_under_ready_dependent(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker("worker-1", "src/core/**")[0], 0)
+        self.assertEqual(
+            self.add_worker(
+                "worker-2",
+                "src/adapter/**",
+                "--depends-on",
+                "worker-1",
+                "--coordination-justification",
+                "Independent adapter context.",
+            )[0],
+            0,
+        )
+        status_path_value = runtime / "workers" / "worker-2" / "STATUS.json"
+        before = status_path_value.read_bytes()
+        result, _, error = self.run_cli(
+            "set-worker-status",
+            "--worker-id",
+            "worker-2",
+            "--status",
+            "completed",
+            "--summary",
+            "Unsafe dependency bypass.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("dependency worker-1 is ready", error)
+        self.assertEqual(status_path_value.read_bytes(), before)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Core done.",
+            )[0],
+            0,
+        )
+        result, _, error = self.reassign_worker("worker-1", "src/core-v2/**")
+        self.assertEqual(result, 2)
+        self.assertIn("nonterminal dependent worker-2", error)
+
+    def test_reassignment_marker_recovers_after_interruption(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "M1 done.",
+            )[0],
+            0,
+        )
+        with mock.patch.object(statectl, "recover_reassignment", side_effect=RuntimeError("crash")):
+            with self.assertRaisesRegex(RuntimeError, "crash"):
+                self.reassign_worker()
+        worker_dir = runtime / "workers" / "worker-1"
+        marker = worker_dir / statectl.REASSIGNMENT_MARKER
+        self.assertTrue(marker.is_file())
+        self.assertEqual(
+            json.loads((worker_dir / "STATUS.json").read_text(encoding="utf-8"))["status"],
+            "completed",
+        )
+        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertFalse(marker.exists())
+        self.assertEqual(
+            json.loads((worker_dir / "STATUS.json").read_text(encoding="utf-8"))["status"],
+            "ready",
+        )
+        self.assertTrue((worker_dir / "history" / "assignment-0001").is_dir())
+
+    def test_reassignment_recovery_refuses_newer_worker_content(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "M1 done.",
+            )[0],
+            0,
+        )
+        with mock.patch.object(statectl, "recover_reassignment", side_effect=RuntimeError("crash")):
+            with self.assertRaises(RuntimeError):
+                self.reassign_worker()
+        task = runtime / "workers" / "worker-1" / "TASK.md"
+        task.write_text("# Newer external task\n", encoding="utf-8")
+        result, _, error = self.run_cli("status")
+        self.assertEqual(result, 2)
+        self.assertIn("refusing to overwrite", error)
+        self.assertEqual(task.read_text(encoding="utf-8"), "# Newer external task\n")
+
+    def test_glob_parent_scope_overlap_is_rejected(self) -> None:
+        self.init()
+        self.assertEqual(self.add_worker("worker-1", "src/**")[0], 0)
+        result, _, error = self.add_worker(
+            "worker-2",
+            "src/adapter/**",
+            "--coordination-justification",
+            "Independent adapter context.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("Write scope overlaps", error)
+        result, _, error = self.add_worker(
+            "worker-3",
+            "**",
+            "--coordination-justification",
+            "This broad scope should still be rejected.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("Write scope overlaps", error)
 
     def test_tampered_escaping_path_fails_validation(self) -> None:
         runtime = self.init()

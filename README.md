@@ -6,7 +6,7 @@
 
 One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.3.1 · Apache-2.0 · Benchmark pending
+> Project status: v0.4.0 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -32,7 +32,7 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 
 TAO optimizes for correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. The goal is value per completed task—not the lowest single-run cost. Sol is reserved for ambiguity, architecture, major decisions, high-risk blockers, and final acceptance. Luna/xhigh Workers perform ordinary searches, environment checks, implementation, experiments, tests, debugging, data/video processing, remote operations, and result packaging; spending more Luna reasoning tokens is acceptable when it avoids rework.
 
-This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower reasoning merely to save a small one-off cost. When Codex native subagent dispatch supports an explicit model, the Lead must pass `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` (or the host equivalent). The Lead must verify the actual/effective runtime model from host metadata; `Worker luna` is only a nickname/UI label and does not prove the model. If the model cannot be confirmed, contradicts the dispatch, or inherited Sol, the Lead must stop that Worker and ask the Owner to open `gpt-5.6-luna / xhigh` manually and send `$tao continue worker-1`. A Luna capability gap escalates first to `gpt-5.6-terra / high` or `xhigh`; Sol is used only for architecture, major decisions, high-risk blockers, or when Terra remains insufficient. TAO must never create a Worker that silently inherits Sol to simulate low-cost delegation.
+This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower reasoning merely to save a small one-off cost. When Codex native subagent dispatch supports an explicit model, the Lead must pass `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` (or the host equivalent). A successful structured host receipt is evidence when the tool contract guarantees accepted overrides; stronger actual/effective metadata must agree. Unsupported, rejected, ignored, or contradictory routing fails closed. A free-form `Worker luna` nickname is not evidence, but the Worker never recursively re-proves a route already guaranteed by the host. For a manually opened Worker, the host's current-conversation selector is evidence: `极高` means `xhigh`, while `高` means `high`; `5.6 Luna / 极高` passes and must never be misreported as high. A Luna capability gap escalates first to `gpt-5.6-terra / high` or `xhigh`; Sol is used only for architecture, major decisions, high-risk blockers, or when Terra remains insufficient.
 
 ## What it does
 
@@ -41,6 +41,7 @@ This routing is a hard constraint. Ordinary execution defaults directly to `gpt-
 - Adds another Worker only for genuine parallelism, distinct responsibilities or context, material context-isolation value, or an explicitly inactive Worker—and only when the benefit exceeds coordination and token cost.
 - Gives every Worker an objective, write scope, dependencies, exclusions, and completion criteria.
 - Archives completed assignments before reusing the stable Worker ID, so old task evidence is never silently overwritten.
+- Reopens a completed project only for actionable Owner work, after archiving an immutable completion snapshot.
 - Separates global Lead-owned state from Worker-owned status to avoid concurrent write conflicts.
 - Escalates decisions and ambiguous intent instead of turning the Owner into a message bus.
 - Loads context progressively so Workers do not pay to read the Lead's entire exploration.
@@ -67,7 +68,7 @@ $HOME/.agents/skills/tiered-agent-orchestrator
 
 Other Agent Skills-compatible coding agents can install the same directory in their supported skill location. The portable contract is the root `SKILL.md`; `agents/openai.yaml` is optional OpenAI-specific metadata.
 
-The Skill is explicit-only and does not activate from ordinary language. Start an orchestration request with `$tao`.
+The Skill is explicit-only and does not activate from ordinary language. Start every orchestration request with `$tao`. Existing `.tiered-agent` state, a previous invocation, or a request to modify TAO itself never activates the Skill implicitly.
 
 ### 2. Open the Project Lead
 
@@ -89,6 +90,8 @@ $tao continue worker-1
 ```
 
 For the next sequential milestone, the Lead reassigns `worker-1` and the Owner returns to this same Worker conversation. A milestone boundary alone never creates `worker-2`.
+
+If a completed project later receives actionable feedback, invoke `$tao` in the original Lead conversation. The Lead archives the completed project with `reopen-project`, returns it to planning, and reassigns the same completed Worker. A question, summary, explanation, status request, or ambiguous remark leaves the project complete; ambiguity is clarified before reopening.
 
 Work normally in the Worker conversation. Return to the original Project Lead conversation for a blocker, ambiguous direction change, architecture decision, or management status:
 
@@ -143,7 +146,7 @@ Sol reads the summary and chooses the next stage
 Lead reassigns the same worker-1
 ```
 
-When explicit economy routing or effective-model confirmation is unavailable:
+When explicit economy routing is unsupported, rejected, or contradicted by effective metadata:
 
 ```text
 Sol Project Lead prepares worker-1 and stops any unverified native Worker
@@ -154,7 +157,7 @@ Owner opens gpt-5.6-luna / xhigh and sends:
 $tao continue worker-1
 ```
 
-TAO does not continuously poll or duplicate Worker work after dispatch. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
+The manual conversation's host selector is the verification boundary; it must not request another manual Worker as proof. If the same conversation is Luna/high, switch that conversation to xhigh and continue it. TAO does not continuously poll or duplicate Worker work after dispatch. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
 
 ## Commands
 
@@ -177,6 +180,8 @@ Simple, local, low-risk edits are completed directly without creating orchestrat
 ├── OWNER_DIRECTIVES.md
 ├── HANDOFF.md
 ├── inbox/owner/<event-id>.md
+├── history/completion-<revision>/
+│   └── complete global, Worker, and Review snapshot
 ├── workers/<worker-id>/
 │   ├── TASK.md
 │   ├── STATUS.json
@@ -188,7 +193,8 @@ Simple, local, low-risk edits are completed directly without creating orchestrat
 └── review/
     ├── TASK.md
     ├── STATUS.json
-    └── REPORT.md
+    ├── REPORT.md
+    └── history/review-<revision>/
 ```
 
 `STATE.json` is deliberately small and never stores chat transcripts, hidden reasoning, secrets, command logs, or model names. `PLAN.md` stores decisions rather than chain-of-thought. `HANDOFF.md` stores only the next role's essential facts.
@@ -197,12 +203,14 @@ Global state, the plan, directives, assignments, and assignment archives have on
 
 ## State helper
 
-Python 3.9+ is the only runtime dependency. The helper uses the standard library. Initialization never overwrites existing state, and reassignment archives the completed task, status, and blocker before replacing the current assignment.
+Python 3.9+ is the only runtime dependency. The helper uses the standard library. Initialization never overwrites existing state. Reopen snapshots completed projects; reassignment and review assignment preserve old evidence and recover interrupted multi-file transactions before replacing current state.
 
 ```console
 python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
 python scripts/statectl.py add-worker --project-root /path/to/project --worker-id worker-1 --objective "Implement the parser" --allowed-scope "src/parser/**" --completion-criterion "Parser tests pass"
+python scripts/statectl.py reopen-project --project-root /path/to/project --reason "Owner requested a correction" --milestone "M2 correction"
 python scripts/statectl.py reassign-worker --project-root /path/to/project --worker-id worker-1 --milestone "M2" --objective "Integrate the parser" --allowed-scope "src/integration/**" --completion-criterion "Integration tests pass"
+python scripts/statectl.py resolve-owner-feedback --project-root /path/to/project --event-id <event-id> --resolution "Integrated into M2"
 python scripts/statectl.py validate --project-root /path/to/project
 python scripts/statectl.py status --project-root /path/to/project
 ```
@@ -222,11 +230,15 @@ Profiles are editable recommendations. Changing a model mapping never changes pe
 
 A Worker applies a clear local correction directly when it remains inside the assignment. It does not reinterpret feedback such as “this feels too engineered” into an architecture change. Instead it records the exact Owner message, pauses conflicting work, and returns the decision to the original Lead.
 
+Completed state is frozen but reopenable. The Lead answers read-only follow-ups without mutation. For actionable work it snapshots the prior completion, reopens explicitly, and reuses the original Worker. Owner-event status is parsed only from frontmatter, so verbatim text cannot forge a pending event.
+
 Escalation is evidence-based, not “three failures means stop.” A Worker continues while each attempt tests a distinct hypothesis and stops when it is repeating the same failure class without new evidence.
 
 ## Review policy
 
 Low-risk, well-validated work can finish without a separate review. Medium or large changes normally use a balanced Reviewer. A strong Reviewer is reserved for high-risk, core algorithm, architecture, security, or multi-Worker integration work.
+
+Changing reviewed code invalidates the old approval. TAO retains the evidence, requires a replacement review, and archives the old review when the new assignment is published.
 
 ## Benchmarking
 
@@ -247,12 +259,14 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-The test suite covers initialization without overwrite, schema and path safety, reusable Worker reassignment and immutable assignment history, parallel-Worker justification, write-scope conflicts, blocker recovery, review, verbatim Owner feedback, management status, all A–J behavior contracts, and benchmark aggregation.
+The test suite covers initialization without overwrite, completed-project reopen/history, schema and path safety, crash-recoverable Worker/Review reassignment, reusable Workers, dependency and glob-scope conflicts, stale-review prevention, verbatim Owner feedback, explicit activation/model-routing contracts, all A–M behavior contracts, and benchmark aggregation.
 
 ## Compatibility and current limitations
 
 - Requires conversations to share a writable repository.
 - The Owner manually opens model-specific top-level conversations in v1.
+- Repository state can resume a formal Worker after a lost host conversation, but TAO cannot resurrect the host conversation object itself.
+- Reopen, Worker reassignment, and Review assignment are crash-recoverable. A process crash during first-time `init` or `add-worker` may still require manual cleanup of an unregistered partial directory; the helper fails closed instead of deleting it automatically.
 - Model and reasoning labels vary across hosts; use the generic profile when needed.
 - Token and credit telemetry must come from the host or documented manual measurements.
 - SkillsMP independently scans public GitHub repositories on its own schedule; repository publication cannot guarantee immediate indexing.

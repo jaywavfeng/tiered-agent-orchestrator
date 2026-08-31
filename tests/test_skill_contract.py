@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.3.1"', frontmatter)
+        self.assertIn('version: "0.4.0"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -66,11 +66,11 @@ class SkillContractTests(unittest.TestCase):
             with self.subTest(path=path):
                 json.loads(path.read_text(encoding="utf-8"))
 
-    def test_eval_suite_covers_a_through_j(self) -> None:
+    def test_eval_suite_covers_a_through_m(self) -> None:
         value = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
         self.assertEqual(value["skill_name"], "tao")
         ids = [item["id"] for item in value["evals"]]
-        self.assertEqual(ids, list("ABCDEFGHIJ"))
+        self.assertEqual(ids, list("ABCDEFGHIJKLM"))
         for item in value["evals"]:
             self.assertTrue(item["prompt"].strip())
             self.assertTrue(item["expected_output"].strip())
@@ -109,6 +109,22 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("completed → ready", runtime)
         self.assertIn("history/assignment-", runtime)
         self.assertIn("Only PROJECT_LEAD", protocol)
+        self.assertIn("reopen-project", skill)
+        self.assertIn("history/completion-", runtime)
+
+    def test_activation_is_explicit_even_when_runtime_exists(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        metadata = (ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        for text in (skill, protocol):
+            self.assertIn("explicit", text.lower())
+            self.assertIn("$tao", text)
+            self.assertIn("`.tiered-agent`", text)
+            self.assertIn("never", text.lower())
+        self.assertIn("allow_implicit_invocation: false", metadata)
+        self.assertIn("develop/test/release TAO itself", skill)
 
     def test_cost_first_dispatch_contract_is_hard(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -142,7 +158,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("SOL escalation", profile)
         self.assertIn("Terra remains insufficient", profile)
 
-    def test_native_dispatch_verifies_effective_runtime_and_waits_by_event(self) -> None:
+    def test_native_and_manual_dispatch_verify_without_recursive_deadlock(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
         protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
             encoding="utf-8"
@@ -151,13 +167,18 @@ class SkillContractTests(unittest.TestCase):
             encoding="utf-8"
         ).lower()
         for text in (skill, protocol, runtime):
-            self.assertIn("actual/effective runtime model", text)
-            self.assertIn("nickname", text)
-            self.assertIn("unconfirmed", text)
+            self.assertIn("structured host receipt", text)
+            self.assertIn("contradict", text)
+            self.assertIn("recurs", text)
             self.assertIn("passive", text)
             self.assertIn("timeout is not a milestone", text)
         self.assertIn("same failure", skill)
         self.assertIn("same failure", protocol)
+        profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
+        self.assertIn("`极高` = `xhigh`", profile)
+        self.assertIn("`高` = `high`", profile)
+        self.assertIn("`5.6 Luna / 极高` passes", profile)
+        self.assertIn("must not recursively", profile)
 
     def test_lead_delegates_mechanical_work(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
@@ -178,16 +199,18 @@ class SkillContractTests(unittest.TestCase):
                 self.assertIn("status.json", text)
                 self.assertTrue("poll" in text or "轮询" in text)
                 self.assertIn("worker-1", text)
+                self.assertIn("极高", text)
+                self.assertIn("reopen", text)
 
     def test_readmes_show_automatic_and_manual_economy_flows(self) -> None:
         english = (ROOT / "README.md").read_text(encoding="utf-8")
         chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         self.assertIn("explicit spawn of gpt-5.6-luna / xhigh worker-1", english)
         self.assertIn("Owner opens gpt-5.6-luna / xhigh", english)
-        self.assertIn("silently inherits Sol", english)
+        self.assertIn("structured host receipt", english)
         self.assertIn("显式 spawn gpt-5.6-luna / xhigh worker-1", chinese)
         self.assertIn("Owner 打开 gpt-5.6-luna / xhigh", chinese)
-        self.assertIn("继承 Sol", chinese)
+        self.assertIn("结构化回执", chinese)
 
     def test_legacy_invocation_name_is_absent(self) -> None:
         legacy = "$tiered-agent-" + "orchestrator"
