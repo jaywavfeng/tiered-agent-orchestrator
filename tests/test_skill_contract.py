@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.4.1"', frontmatter)
+        self.assertIn('version: "0.4.2"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -66,11 +66,11 @@ class SkillContractTests(unittest.TestCase):
             with self.subTest(path=path):
                 json.loads(path.read_text(encoding="utf-8"))
 
-    def test_eval_suite_covers_a_through_o(self) -> None:
+    def test_eval_suite_covers_a_through_p(self) -> None:
         value = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
         self.assertEqual(value["skill_name"], "tao")
         ids = [item["id"] for item in value["evals"]]
-        self.assertEqual(ids, list("ABCDEFGHIJKLMNO"))
+        self.assertEqual(ids, list("ABCDEFGHIJKLMNOP"))
         for item in value["evals"]:
             self.assertTrue(item["prompt"].strip())
             self.assertTrue(item["expected_output"].strip())
@@ -158,7 +158,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("SOL escalation", profile)
         self.assertIn("Terra remains insufficient", profile)
 
-    def test_native_and_manual_dispatch_verify_without_recursive_deadlock(self) -> None:
+    def test_native_and_manual_dispatch_are_separate_without_recursive_deadlock(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
         protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
             encoding="utf-8"
@@ -176,10 +176,33 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("same failure", skill)
         self.assertIn("same failure", protocol)
         profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
+        self.assertIn("## Owner-created top-level Worker or Reviewer", profile)
         self.assertIn("`极高` = `xhigh`", profile)
         self.assertIn("`高` = `high`", profile)
-        self.assertIn("`5.6 Luna / 极高` passes", profile)
-        self.assertIn("must not recursively", profile)
+        self.assertIn("`5.6 Luna / high`", profile)
+        self.assertIn("Luna with any other reasoning setting all continue", profile)
+        self.assertIn("If it is unavailable, continue", profile)
+        self.assertIn("resend `$tao continue worker-N`", profile)
+
+    def test_owner_created_runtime_never_gates_reasoning_or_unavailable_model(self) -> None:
+        paths = [
+            ROOT / "SKILL.md",
+            ROOT / "references" / "orchestration-protocol.md",
+            ROOT / "references" / "runtime-state.md",
+            ROOT / "profiles" / "openai-codex.md",
+        ]
+        for path in paths:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=path):
+                self.assertIn("owner-created", text)
+                self.assertIn("reasoning", text)
+                self.assertIn("unavailable", text)
+                self.assertIn("continue", text)
+                self.assertTrue("model-only" in text or "model family" in text)
+        skill = paths[0].read_text(encoding="utf-8")
+        self.assertIn("Never validate or gate reasoning", skill)
+        self.assertIn("Luna / high", skill)
+        self.assertIn("without mentioning the uncertainty", skill)
 
     def test_route_evidence_is_stronger_than_acceptance_and_separate_from_billing(self) -> None:
         paths = [
@@ -220,15 +243,17 @@ class SkillContractTests(unittest.TestCase):
                 self.assertIn("worker-1", text)
                 self.assertIn("极高", text)
                 self.assertIn("reopen", text)
+                self.assertTrue("reasoning is never" in text or "完全不检查 reasoning" in text)
+                self.assertTrue("unavailable" in text or "看不到模型指示" in text)
 
     def test_readmes_show_automatic_and_manual_economy_flows(self) -> None:
         english = (ROOT / "README.md").read_text(encoding="utf-8")
         chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         self.assertIn("explicit spawn of gpt-5.6-luna / xhigh worker-1", english)
-        self.assertIn("Owner opens gpt-5.6-luna / xhigh", english)
+        self.assertIn("Owner opens gpt-5.6-luna (xhigh recommended)", english)
         self.assertIn("machine-readable actual/effective", english)
         self.assertIn("显式 spawn gpt-5.6-luna / xhigh worker-1", chinese)
-        self.assertIn("Owner 打开 gpt-5.6-luna / xhigh", chinese)
+        self.assertIn("Owner 打开 gpt-5.6-luna（建议 xhigh）", chinese)
         self.assertIn("机器可读 actual/effective", chinese)
 
     def test_legacy_invocation_name_is_absent(self) -> None:

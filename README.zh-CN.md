@@ -6,7 +6,7 @@
 
 一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
 
-> 项目状态：v0.4.1 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.4.2 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -32,7 +32,7 @@ Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完�
 
 TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，再减少 credits/成本，再减少不必要的上下文和模型切换，最后才是减少总 Token。目标是每个已完成任务的价值，而不是单次运行的最低成本。Sol 只处理模糊需求、架构、重大决策、高风险 blocker 和最终验收；普通执行默认由 Luna/xhigh Worker 负责。为避免返工，允许 Luna 使用更多 reasoning Token。
 
-模型路由是硬约束。普通执行直接默认 `gpt-5.6-luna / xhigh`，不要为了省一点单次 reasoning 导致返工。只有宿主既接受显式 `model: "gpt-5.6-luna"`、`reasoning_effort: "xhigh"`，又返回两者的机器可读 actual/effective 值时，才允许原生 dispatch。参数被接受或回显、success 标志和 nickname 都不是证明；元数据缺失或矛盾时必须在实质工作前 fail closed，Sol 也不得接手代做，应改用手动选择的顶层 Worker。其宿主 selector 是路由证据：`极高` 就是 `xhigh`，`高` 才是 `high`；`5.6 Luna / 极高` 必须直接通过。路由证据不等于计费证据：只有宿主按模型/按对话遥测或有记录的人工测量才能把 Token/credits 归因给 Luna。同一门控也适用于 Terra 升级和 Reviewer，避免静默继承 Sol。
+模型路由是硬约束。普通执行直接默认 `gpt-5.6-luna / xhigh`，不要为了省一点单次 native reasoning 导致返工。只有宿主既接受显式 `model: "gpt-5.6-luna"`、`reasoning_effort: "xhigh"`，又返回两者的机器可读 actual/effective 值时，才允许原生 dispatch。参数被接受或回显、success 标志和 nickname 都不是证明；元数据缺失或矛盾时必须在实质 native 工作前 fail closed，Sol 也不得接手代做。Owner 自己创建的顶层对话不同：TAO 最多检查明确可见的模型类型，完全不校验、不门控 reasoning。Luna/high、Luna/极高或 Luna 的其他 reasoning 都直接继续；Agent 看不到模型指示时也直接继续，不要求检查 selector 或重发命令。路由证据不等于计费证据：只有宿主按模型/按对话遥测或有记录的人工测量才能把 Token/credits 归因给 Luna。Native Terra 升级和 Reviewer 保留严格门控；手动顶层对话使用较轻规则。
 
 ## 它会做什么
 
@@ -155,11 +155,11 @@ Sol Project Lead 准备 worker-1，并停止未经确认的 native Worker
   ↓
 Sol 停止
   ↓
-Owner 打开 gpt-5.6-luna / xhigh 并发送：
+Owner 打开 gpt-5.6-luna（建议 xhigh）并发送：
 $tao continue worker-1
 ```
 
-手动对话的宿主 selector 就是路由验证边界，不能再要求 Owner 新建另一个“可验证 Worker”。如果同一对话是 Luna/high，只需把该对话切换为 xhigh 后继续。计费归因仍需宿主遥测或有记录的人工测量。TAO 不会在 dispatch 后持续轮询或重复 Worker 工作；一次 passive wait 没有新事件便结束等待，不再触发 Sol 分析循环。Luna 同一失败方案无新证据时必须停止，先升级 Terra，不得无意义重试。
+对 Owner 自己创建的对话，只检查明确可见的模型类型，完全不检查 reasoning：Luna/high、Luna/极高或 Luna 的其他 reasoning 都继续。Agent 看不到模型指示时，直接继续原 Worker，不要求 Owner 检查 selector、重发命令、提供证明或新建 Worker。明确显示模型错误时，最多简短提醒一次并保留同一对话。计费归因仍需宿主遥测或有记录的人工测量。TAO 不会在 dispatch 后持续轮询或重复 Worker 工作；一次 passive wait 没有新事件便结束等待，不再触发 Sol 分析循环。Luna 同一失败方案无新证据时必须停止，先升级 Terra，不得无意义重试。
 
 ## 命令
 
@@ -261,7 +261,7 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-测试覆盖原子初始化、可恢复的 Worker 注册/重分配/Review 分配、completed project reopen/history、schema 与路径安全、Worker 复用、依赖与普通路径/glob 写域冲突、陈旧 Review 防护、Owner 原话保存、显式激活与模型路由契约、A–O 行为契约，以及 benchmark 归因与聚合。
+测试覆盖原子初始化、可恢复的 Worker 注册/重分配/Review 分配、completed project reopen/history、schema 与路径安全、Worker 复用、依赖与普通路径/glob 写域冲突、陈旧 Review 防护、Owner 原话保存、显式激活与模型路由契约、A–P 行为契约，以及 benchmark 归因与聚合。
 
 ## 兼容性与当前限制
 
@@ -269,8 +269,8 @@ python scripts/benchmark.py --help
 - v1 由 Owner 手动打开指定模型的顶层对话。
 - 仓库状态可以在宿主对话丢失后恢复同一个 formal Worker，但 TAO 无法复活宿主本身已经丢失的 conversation object。
 - 初始化采用原子发布；Worker 注册、reopen、Worker reassignment 和 Review assignment 都支持 crash recovery。旧版本已经留下的 partial runtime 仍会 fail closed，需要人工检查后处理。
-- 不同宿主的模型和 reasoning 名称可能不同，必要时使用通用 Profile。
-- 模型 selector 与 effective metadata 只证明路由，不证明计费；Token 与 credits 归因必须来自宿主按模型/按对话遥测或有记录的人工测量，否则记为 unknown。
+- 不同宿主的模型和 reasoning 名称可能不同，必要时使用通用 Profile。Owner 创建的对话绝不根据 reasoning 标签门控 continuation。
+- Native effective metadata 只证明 native 路由，不证明计费；手动路由由 Owner 控制。Token 与 credits 归因必须来自宿主按模型/按对话遥测或有记录的人工测量，否则记为 unknown。
 - SkillsMP 独立按自己的周期扫描公开 GitHub 仓库；发布仓库不能保证立刻完成索引。
 
 项目结构遵循 [Agent Skills 规范](https://agentskills.io/specification)和[官方 OpenAI Skill 文档](https://learn.chatgpt.com/docs/build-skills)。OpenAI 模型映射依据[官方模型说明](https://learn.chatgpt.com/docs/models)。

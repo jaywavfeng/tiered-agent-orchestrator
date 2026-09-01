@@ -10,11 +10,11 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
 3. Native dispatch is used only if the host accepts explicit routing and returns machine-readable actual/effective model and reasoning metadata. The Lead requests `model: gpt-5.6-luna` and `reasoning_effort: xhigh`, then requires both returned values to match. Acceptance or echoed arguments alone are insufficient; missing or contradictory evidence fails closed before substantive work. The Worker never recursively self-verifies a native route. When manual fallback is required, the Lead tells the Owner:
 
-   > Open `gpt-5.6-luna / xhigh`, create one economy Worker conversation, and send:
+   > Open `gpt-5.6-luna` (xhigh recommended), create one economy Worker conversation, and send:
    >
    > `$tao continue worker-1`
 
-   In the manual conversation, the host's current model selector is routing evidence. `5.6 Luna / 极高` means Luna/xhigh and passes; `极高` must never be guessed or reported as `high`. If the same conversation is Luna/high, switch that conversation to xhigh and continue it instead of opening another Worker. Token or credit attribution remains unknown without host per-model/per-conversation telemetry or a documented manual measurement.
+   In this Owner-created conversation, only a clearly visible model family is checked. Reasoning is never validated or gated: Luna/high, Luna/极高, and any other Luna reasoning setting continue. If the Agent cannot see the model indicator, it continues `worker-1` without asking the Owner to inspect a selector, resend the command, or open another Worker. A clearly wrong model gets one concise correction for the same conversation. Token or credit attribution remains unknown without host per-model/per-conversation telemetry or a documented manual measurement.
 
 4. The Worker reads its repository assignment, implements and validates milestone M1, and marks its assignment `completed`.
 

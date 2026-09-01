@@ -4,7 +4,7 @@ description: Orchestrate large, multi-stage, or long-running engineering work wi
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.4.1"
+  version: "0.4.2"
 ---
 
 # Tiered Agent Orchestrator
@@ -70,10 +70,11 @@ For a new project:
 ### Hard model-routing and dispatch rules
 
 - Native automation is allowed only when the host both accepts explicit model/reasoning fields **and returns machine-readable actual/effective model and reasoning evidence for the created runtime**. PROJECT_LEAD **MUST** pass the configured economy model and `xhigh` reasoning, compare both returned values with the request, and bind the runtime to one formal `worker-N`. An accepted request, echoed input, success flag, runtime nickname, or undocumented assumption is not effective-route evidence.
-- Missing, rejected, ignored, or contradictory actual/effective metadata fails closed before substantive Worker work. Determine this capability from the host contract before spawning when possible; if a purportedly attested spawn omits the evidence, stop that runtime. The Worker must not introspect or recursively self-prove its own route—the Lead verifies native evidence, while a manual Worker uses its host-owned current-conversation selector.
-- If the host cannot provide that native attestation, PROJECT_LEAD **MUST NOT** spawn a Worker and **MUST NOT** perform the assignment on Sol as a fallback. Stop the turn and tell the Owner to create or select a top-level economy Worker manually using the profile's model/reasoning and `$tao continue worker-N`. In that manual conversation, the host's current-conversation model/reasoning selector is the routing evidence. Never demand another manual Worker as a second proof. If the selector shows the correct model but lower reasoning, ask the Owner to change the same conversation to the required setting and continue it.
-- Routing evidence and billing evidence are separate. Neither a native effective-route attestation nor a manual selector proves token/credit attribution. TAO may report per-tier tokens, credits, or savings only from host per-model/per-conversation telemetry or a documented manual measurement; otherwise mark attribution unknown and make no savings claim.
-- Apply the same explicit-route, attestation, and manual-fallback gate to escalated Workers and Reviewers so they cannot silently inherit Sol.
+- Missing, rejected, ignored, or contradictory actual/effective metadata fails closed before substantive **native** Worker work. Determine this capability from the host contract before spawning when possible; if a purportedly attested spawn omits the evidence, stop that runtime. The Worker must not introspect or recursively self-prove its own route—the Lead verifies native evidence. Do not transfer this native attestation gate to an Owner-created top-level conversation.
+- If the host cannot provide native attestation, PROJECT_LEAD **MUST NOT** spawn a Worker and **MUST NOT** perform the assignment on Sol as a fallback. Stop the turn and tell the Owner to create or select a top-level economy Worker manually using the profile's model and `$tao continue worker-N`; the profile's reasoning level is a recommendation for creation, not a continuation gate.
+- An Owner-created top-level Worker or Reviewer has a deliberately lighter gate: check only the model family when the host clearly exposes it. Never inspect, validate, correct, or gate its reasoning level. If the model indicator is unavailable to the Agent, treat it as Owner-controlled and continue the existing `worker-N`/Reviewer without asking the Owner to inspect a selector, resend the command, create another conversation, or provide independent proof. If the visible model is clearly the wrong family, give one brief correction to switch the same conversation; preserve the assignment and never start a recursive verification loop.
+- Routing evidence and billing evidence are separate. Neither native effective-route attestation nor an Owner-controlled manual route proves token/credit attribution. TAO may report per-tier tokens, credits, or savings only from host per-model/per-conversation telemetry or a documented manual measurement; otherwise mark attribution unknown and make no savings claim.
+- Apply strict explicit-route attestation to native escalated Workers and Reviewers so they cannot silently inherit Sol. Their Owner-created top-level fallbacks use the lighter model-only, reasoning-agnostic rule.
 - A native subagent is only a Worker runtime; it remains bound by `TASK.md`, scope, status, dependencies, ownership, and the single-writer protocol. The host's multi-agent capability never justifies fan-out.
 - After dispatching a Worker, **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout and re-analyze, duplicate the assignment, or perform the Worker's execution. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resume on a completion, blocker, milestone, or Owner event. For a manually opened Worker, end the Lead turn and wait for the Owner to return with `continue`.
 
@@ -98,7 +99,7 @@ Before editing, verify:
 - the requested changes fit `allowed_scope` and avoid `do_not_modify`;
 - dependency Workers are complete when required.
 
-For a manually opened Worker, use the host's exact current-conversation indicator. In the OpenAI profile, `极高` maps to `xhigh` and `高` maps to `high`; never infer or downgrade an unread value. A verified `Luna / 极高` manual Worker passes. If the value is unavailable, report it as unknown rather than inventing `high`, and ask the Owner to check the same conversation's selector—never recursively request another Worker.
+For an Owner-created top-level Worker, do not apply native attestation. If a current-conversation model indicator is clearly visible, check only that its model family matches the assigned Worker tier. Never validate or gate reasoning: `Luna / high`, `Luna / 极高`, and Luna with any other reasoning setting all continue. If the Agent cannot see the model or selector, continue from repository state without mentioning the uncertainty or asking the Owner to check, resend `$tao continue worker-N`, or create another Worker. A clearly visible wrong model gets at most one concise correction for the same conversation; it never changes or duplicates the formal Worker.
 
 Then work independently through implementation and validation. Update only the Worker's status, its allowed code scope, its blocker file, and uniquely named Owner inbox events. Do not edit global state, the plan, other assignments, or other Worker status files.
 
@@ -114,7 +115,7 @@ When blocked, follow [escalation and review](references/escalation-and-review.md
 
 Proceed only when `STATE.json` requests review and `review/TASK.md` names the reviewer. Read the review task, relevant diff, completion criteria, and validation evidence. Do not broaden implementation scope. A strong-tier review requires an explicit high-risk justification; ordinary review stays below strong.
 
-Before a native Reviewer starts, apply the same route-attestation gate as a Worker using the profile's configured review model and reasoning. If native effective metadata is unavailable, use a manually selected top-level Reviewer conversation; never let the Reviewer silently inherit the Project Lead model.
+Before a native Reviewer starts, apply the same strict route-attestation gate as a native Worker using the profile's configured review model and reasoning. If native effective metadata is unavailable, use an Owner-created top-level Reviewer conversation. That manual Reviewer checks only a clearly visible model family and never gates reasoning; an unavailable indicator does not block review. Never let a native Reviewer silently inherit the Project Lead model.
 
 Write findings and evidence to `review/REPORT.md` and update `review/STATUS.json`. Approve, request bounded fixes, or escalate a decision to PROJECT_LEAD. Never invent release approval when validation is incomplete.
 

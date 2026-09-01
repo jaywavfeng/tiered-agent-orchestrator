@@ -126,18 +126,18 @@
     },
     {
       "id": "M",
-      "prompt": "$tao continue worker-1. The host's current-conversation selector says 5.6 Luna / 极高.",
-      "expected_output": "The manual Worker recognizes 极高 as xhigh, passes the manual routing gate, and continues the existing assignment without asking for another Worker.",
+      "prompt": "$tao continue worker-1. The Owner-created conversation visibly says 5.6 Luna / high, although xhigh was recommended.",
+      "expected_output": "The manual Worker checks only the visible Luna model family, ignores the Owner-selected reasoning level, and immediately continues the existing assignment.",
       "assertions": [
-        "极高 is mapped to xhigh rather than high.",
-        "The Worker does not request recursive independent model proof.",
+        "Luna/high is not blocked or asked to switch to xhigh.",
+        "The Worker does not request a selector check, command resend, or recursive independent proof.",
         "The existing worker-1 is continued."
       ]
     },
     {
       "id": "N",
       "prompt": "$tao The native spawn call accepted model=gpt-5.6-luna and reasoning_effort=xhigh and returned success plus a child ID, but no actual/effective model or reasoning metadata.",
-      "expected_output": "The Project Lead treats the native route as unverified, prevents substantive child work, preserves worker-1, and asks the Owner to continue the same formal assignment in a manually selected Luna/xhigh conversation instead of letting Sol perform it.",
+      "expected_output": "The Project Lead treats the native route as unverified, prevents substantive child work, preserves worker-1, and asks the Owner to continue the same formal assignment in a manually selected Luna conversation (xhigh recommended, not gated) instead of letting Sol perform it.",
       "assertions": [
         "Accepted or echoed request fields are not treated as effective-route proof.",
         "The unverified native runtime fails closed before substantive work.",
@@ -152,6 +152,17 @@
         "Reviewer dispatch uses the same fail-closed effective-route gate as Worker dispatch.",
         "Routing evidence and billing evidence are distinguished.",
         "Missing telemetry prevents a token or credit savings claim."
+      ]
+    },
+    {
+      "id": "P",
+      "prompt": "$tao continue worker-3. This is an Owner-created top-level Worker, but the Agent cannot see the current conversation's model or reasoning selector.",
+      "expected_output": "The Worker treats the manual route as Owner-controlled and continues worker-3 from repository state without blocking, asking for selector confirmation, repeating the command, or creating another Worker.",
+      "assertions": [
+        "Unavailable manual model information does not block continuation.",
+        "Manual reasoning is neither inspected nor validated.",
+        "The Owner is not asked to resend $tao continue worker-3 or open a replacement conversation.",
+        "Native actual/effective model and reasoning attestation remains unchanged for automatic dispatch."
       ]
     }
   ]

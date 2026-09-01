@@ -6,7 +6,7 @@
 
 One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.4.1 · Apache-2.0 · Benchmark pending
+> Project status: v0.4.2 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -32,7 +32,7 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 
 TAO optimizes for correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. The goal is value per completed task—not the lowest single-run cost. Sol is reserved for ambiguity, architecture, major decisions, high-risk blockers, and final acceptance. Luna/xhigh Workers perform ordinary searches, environment checks, implementation, experiments, tests, debugging, data/video processing, remote operations, and result packaging; spending more Luna reasoning tokens is acceptable when it avoids rework.
 
-This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower reasoning merely to save a small one-off cost. Native dispatch is allowed only when the host accepts explicit `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` **and returns machine-readable actual/effective values for both**. Acceptance, echoed request fields, a success flag, or a nickname is not proof. Missing or contradictory metadata fails closed before substantive work, and Sol must not absorb the assignment. Use a manually selected top-level Worker instead. Its host selector is routing evidence: `极高` means `xhigh`, while `高` means `high`; `5.6 Luna / 极高` passes and must never be misreported as high. Route proof is not billing proof: Luna token/credit attribution requires host per-model/per-conversation telemetry or a documented manual measurement. The same gate applies to Terra escalations and Reviewers so they cannot silently inherit Sol.
+This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower native reasoning merely to save a small one-off cost. Native dispatch is allowed only when the host accepts explicit `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` **and returns machine-readable actual/effective values for both**. Acceptance, echoed request fields, a success flag, or a nickname is not proof. Missing or contradictory metadata fails closed before substantive native work, and Sol must not absorb the assignment. Owner-created top-level conversations are different: TAO checks only a clearly visible model family and never validates or gates reasoning. Luna/high, Luna/极高, and any other Luna reasoning setting continue; an unavailable model indicator also continues without a selector check or command resend. Route proof is not billing proof: Luna token/credit attribution requires host per-model/per-conversation telemetry or a documented manual measurement. Native Terra escalations and Reviewers keep the strict gate; manual ones use the lighter rule.
 
 ## What it does
 
@@ -155,11 +155,11 @@ Sol Project Lead prepares worker-1 and stops any unverified native Worker
   ↓
 Sol stops
   ↓
-Owner opens gpt-5.6-luna / xhigh and sends:
+Owner opens gpt-5.6-luna (xhigh recommended) and sends:
 $tao continue worker-1
 ```
 
-The manual conversation's host selector is the routing boundary; it must not request another manual Worker as proof. If the same conversation is Luna/high, switch that conversation to xhigh and continue it. Billing attribution still requires host telemetry or documented manual measurement. TAO does not continuously poll or duplicate Worker work after dispatch; one unchanged passive-wait timeout ends the wait without another Sol analysis loop. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
+For this Owner-created conversation, only a clearly visible model family is checked. Reasoning is never inspected or gated: Luna/high, Luna/极高, and any other Luna reasoning setting continue. If the Agent cannot see the model indicator, it continues the existing Worker without asking for a selector check, a repeated command, proof, or another Worker. A clearly wrong model gets one concise correction for the same conversation. Billing attribution still requires host telemetry or documented manual measurement. TAO does not continuously poll or duplicate Worker work after dispatch; one unchanged passive-wait timeout ends the wait without another Sol analysis loop. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
 
 ## Commands
 
@@ -261,7 +261,7 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-The test suite covers atomic initialization, crash-recoverable Worker registration/reassignment/Review assignment, completed-project reopen/history, schema and path safety, reusable Workers, dependency and literal/glob-scope conflicts, stale-review prevention, verbatim Owner feedback, explicit activation/model-routing contracts, all A–O behavior contracts, and benchmark attribution/aggregation.
+The test suite covers atomic initialization, crash-recoverable Worker registration/reassignment/Review assignment, completed-project reopen/history, schema and path safety, reusable Workers, dependency and literal/glob-scope conflicts, stale-review prevention, verbatim Owner feedback, explicit activation/model-routing contracts, all A–P behavior contracts, and benchmark attribution/aggregation.
 
 ## Compatibility and current limitations
 
@@ -269,8 +269,8 @@ The test suite covers atomic initialization, crash-recoverable Worker registrati
 - The Owner manually opens model-specific top-level conversations in v1.
 - Repository state can resume a formal Worker after a lost host conversation, but TAO cannot resurrect the host conversation object itself.
 - Initialization is atomically published; Worker registration, reopen, Worker reassignment, and Review assignment are crash-recoverable. Old partial runtimes created by earlier releases remain fail-closed and require deliberate manual inspection.
-- Model and reasoning labels vary across hosts; use the generic profile when needed.
-- Model selectors and effective metadata prove routing, not billing. Token and credit attribution must come from host per-model/per-conversation telemetry or documented manual measurements; otherwise it remains unknown.
+- Model and reasoning labels vary across hosts; use the generic profile when needed. Owner-created conversations never gate continuation on reasoning labels.
+- Native effective metadata proves native routing, not billing. Manual routing is Owner-controlled. Token and credit attribution must come from host per-model/per-conversation telemetry or documented manual measurements; otherwise it remains unknown.
 - SkillsMP independently scans public GitHub repositories on its own schedule; repository publication cannot guarantee immediate indexing.
 
 This structure follows the [Agent Skills specification](https://agentskills.io/specification) and [official OpenAI documentation for building skills](https://learn.chatgpt.com/docs/build-skills). The current OpenAI mapping follows [official model guidance](https://learn.chatgpt.com/docs/models).
