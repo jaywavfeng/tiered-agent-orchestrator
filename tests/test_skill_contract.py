@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.4.0"', frontmatter)
+        self.assertIn('version: "0.4.1"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -66,11 +66,11 @@ class SkillContractTests(unittest.TestCase):
             with self.subTest(path=path):
                 json.loads(path.read_text(encoding="utf-8"))
 
-    def test_eval_suite_covers_a_through_m(self) -> None:
+    def test_eval_suite_covers_a_through_o(self) -> None:
         value = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
         self.assertEqual(value["skill_name"], "tao")
         ids = [item["id"] for item in value["evals"]]
-        self.assertEqual(ids, list("ABCDEFGHIJKLM"))
+        self.assertEqual(ids, list("ABCDEFGHIJKLMNO"))
         for item in value["evals"]:
             self.assertTrue(item["prompt"].strip())
             self.assertTrue(item["expected_output"].strip())
@@ -167,7 +167,8 @@ class SkillContractTests(unittest.TestCase):
             encoding="utf-8"
         ).lower()
         for text in (skill, protocol, runtime):
-            self.assertIn("structured host receipt", text)
+            self.assertIn("actual/effective", text)
+            self.assertIn("accept", text)
             self.assertIn("contradict", text)
             self.assertIn("recurs", text)
             self.assertIn("passive", text)
@@ -179,6 +180,24 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("`高` = `high`", profile)
         self.assertIn("`5.6 Luna / 极高` passes", profile)
         self.assertIn("must not recursively", profile)
+
+    def test_route_evidence_is_stronger_than_acceptance_and_separate_from_billing(self) -> None:
+        paths = [
+            ROOT / "SKILL.md",
+            ROOT / "references" / "orchestration-protocol.md",
+            ROOT / "references" / "runtime-state.md",
+            ROOT / "profiles" / "openai-codex.md",
+        ]
+        for path in paths:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=path):
+                self.assertIn("machine-readable", text)
+                self.assertIn("reasoning", text)
+                self.assertIn("billing", text)
+                self.assertIn("telemetry", text)
+        profile = paths[-1].read_text(encoding="utf-8")
+        self.assertIn("Successful acceptance, echoed request arguments", profile)
+        self.assertIn("Native Terra Workers and Reviewers", profile)
 
     def test_lead_delegates_mechanical_work(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
@@ -207,10 +226,10 @@ class SkillContractTests(unittest.TestCase):
         chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         self.assertIn("explicit spawn of gpt-5.6-luna / xhigh worker-1", english)
         self.assertIn("Owner opens gpt-5.6-luna / xhigh", english)
-        self.assertIn("structured host receipt", english)
+        self.assertIn("machine-readable actual/effective", english)
         self.assertIn("显式 spawn gpt-5.6-luna / xhigh worker-1", chinese)
         self.assertIn("Owner 打开 gpt-5.6-luna / xhigh", chinese)
-        self.assertIn("结构化回执", chinese)
+        self.assertIn("机器可读 actual/effective", chinese)
 
     def test_legacy_invocation_name_is_absent(self) -> None:
         legacy = "$tiered-agent-" + "orchestrator"

@@ -8,13 +8,13 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
 2. The Lead inspects the project, initializes `.tiered-agent`, writes the plan, and assigns `worker-1`.
 
-3. If native dispatch can explicitly select a model, the Lead dispatches the formal Worker with `model: gpt-5.6-luna` and `reasoning_effort: xhigh`. Successful acceptance by a structured host API whose contract guarantees those overrides is routing evidence; stronger actual/effective metadata must agree. Unsupported or contradictory routing fails closed. The Worker never recursively self-verifies a host-confirmed route. When manual fallback is required, the Lead tells the Owner:
+3. Native dispatch is used only if the host accepts explicit routing and returns machine-readable actual/effective model and reasoning metadata. The Lead requests `model: gpt-5.6-luna` and `reasoning_effort: xhigh`, then requires both returned values to match. Acceptance or echoed arguments alone are insufficient; missing or contradictory evidence fails closed before substantive work. The Worker never recursively self-verifies a native route. When manual fallback is required, the Lead tells the Owner:
 
    > Open `gpt-5.6-luna / xhigh`, create one economy Worker conversation, and send:
    >
    > `$tao continue worker-1`
 
-   In the manual conversation, the host's current model selector is evidence. `5.6 Luna / 极高` means Luna/xhigh and passes; `极高` must never be guessed or reported as `high`. If the same conversation is Luna/high, switch that conversation to xhigh and continue it instead of opening another Worker.
+   In the manual conversation, the host's current model selector is routing evidence. `5.6 Luna / 极高` means Luna/xhigh and passes; `极高` must never be guessed or reported as `high`. If the same conversation is Luna/high, switch that conversation to xhigh and continue it instead of opening another Worker. Token or credit attribution remains unknown without host per-model/per-conversation telemetry or a documented manual measurement.
 
 4. The Worker reads its repository assignment, implements and validates milestone M1, and marks its assignment `completed`.
 

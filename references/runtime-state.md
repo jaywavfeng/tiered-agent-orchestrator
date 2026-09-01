@@ -36,7 +36,7 @@ Runtime state records assignments and evidence; it does not select models or rep
     └── history/review-<revision>/{TASK.md,STATUS.json,REPORT.md}
 ```
 
-Use `scripts/statectl.py` for deterministic initialization, registration, reopening, reassignment, validation, status changes, Owner-event resolution, and management summaries. `init` never overwrites an initialized runtime. `reopen-project` archives the complete project before changing global state. Reassignment archives the completed assignment before replacing current files.
+Use `scripts/statectl.py` for deterministic initialization, registration, reopening, reassignment, validation, status changes, Owner-event resolution, and management summaries. `init` builds a complete sibling staging directory and publishes it atomically without overwriting an initialized runtime. First Worker registration uses a durable marker recovered by the next command. `reopen-project` archives the complete project before changing global state. Reassignment archives the completed assignment before replacing current files.
 
 ## Ownership
 
@@ -119,15 +119,17 @@ If a process stops after publishing the completion snapshot but before updating 
 
 ## Review history and invalidation
 
-When execution resumes after a completed review, the global reviewer assignment is detached while the review requirement remains. This makes the old approval stale without destroying its files. The next `assign-review` archives that completed evidence under `review/history/review-NNNN/` before publishing the replacement assignment. Completion cannot use the detached review.
+When execution resumes after a completed review, the global reviewer assignment is detached while the review requirement remains. An unfinished review cannot transition back to execution, and `add-worker` is forbidden while the project is in review. This makes the old approval stale without destroying its files. The next `assign-review` archives that completed evidence under `review/history/review-NNNN/` before publishing the replacement assignment. Completion cannot use the detached review.
+
+`assign-review --level strong` requires `--strong-justification`, which is preserved in `review/TASK.md`. This prevents a routine review from silently consuming the strong tier.
 
 Both `reassign-worker` and `assign-review` create a private durable marker before their multi-file update. At the start of the next command, `statectl.py` completes an interrupted compatible transaction. Recovery accepts only files matching the marker's old or new values and fails closed rather than overwriting newer content.
 
 ## Dispatch handoff
 
-When the host supports native subagents, a dispatch is valid only when the caller explicitly supplies the configured economy model and `xhigh` reasoning and registers the subagent as a formal Worker. A successful structured host receipt is routing evidence when the host contract guarantees accepted overrides; stronger effective metadata must agree. Unsupported, rejected, ignored, or contradictory routing fails closed. The Worker does not recursively self-verify a route confirmed by its host. For a manual top-level Worker, the host-owned current-conversation selector is evidence and is checked in that same conversation. Native subagents remain subject to this state contract.
+When the host supports native subagents, a dispatch is valid only when the caller explicitly supplies the configured model/reasoning, the host returns machine-readable actual/effective values for both, those values match, and the runtime is registered as the intended Worker or Reviewer. Acceptance, echoed arguments, a success flag, or a nickname is not evidence. Missing, rejected, ignored, or contradictory routing fails closed before substantive work. The child does not recursively self-verify a native route; the Lead checks the host receipt. For a manual top-level runtime, the host-owned current-conversation selector is routing evidence in that same conversation. Billing attribution remains unproven without host per-model/per-conversation telemetry or a documented manual measurement.
 
-After dispatch, no high-frequency status polling loop is part of the runtime protocol. The Lead may passively wait for an event that advances the Worker, but a timeout is not a milestone and must not trigger a timeout → re-analysis → status-check loop. A manual Worker is resumed by returning to its original conversation with `$tao continue worker-N`.
+After dispatch, no high-frequency status polling loop is part of the runtime protocol. The Lead may passively wait for an event that advances the Worker, but a timeout is not a milestone and must not trigger a timeout → re-analysis → status-check loop. One unchanged timeout ends that wait. A manual Worker is resumed by returning to its original conversation with `$tao continue worker-N`.
 
 ## Owner feedback events
 

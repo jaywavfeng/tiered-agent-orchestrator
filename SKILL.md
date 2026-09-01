@@ -4,7 +4,7 @@ description: Orchestrate large, multi-stage, or long-running engineering work wi
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.4.0"
+  version: "0.4.1"
 ---
 
 # Tiered Agent Orchestrator
@@ -69,9 +69,11 @@ For a new project:
 
 ### Hard model-routing and dispatch rules
 
-- If the host can natively spawn a TAO Worker with an explicit model, PROJECT_LEAD **MUST** pass the configured economy model and `xhigh` reasoning. The `model` parameter **MUST NOT** be omitted, and the spawned agent **MUST** map to one formal `worker-N` assignment.
-- After native dispatch, PROJECT_LEAD **MUST** verify the actual/effective route from the structured host receipt or stronger effective-model metadata. Successful acceptance of explicit `model` and reasoning fields by a host whose tool contract guarantees those overrides is evidence; if the host rejects/ignores the fields or returns contradictory effective metadata, stop the Worker and fail closed. A free-form nickname is not evidence. The Worker must not recursively self-verify a route already guaranteed by the host receipt.
-- If the host cannot reliably set an economy model explicitly, PROJECT_LEAD **MUST NOT** spawn a Worker. Stop the turn and tell the Owner to create a top-level economy Worker manually using the profile's model/reasoning and `$tao continue worker-N`. In that manual conversation, the host's current-conversation model/reasoning selector is the evidence. Never demand another manual Worker as a second proof. If the selector shows the correct model but lower reasoning, ask the Owner to change the same conversation to the required setting and continue it.
+- Native automation is allowed only when the host both accepts explicit model/reasoning fields **and returns machine-readable actual/effective model and reasoning evidence for the created runtime**. PROJECT_LEAD **MUST** pass the configured economy model and `xhigh` reasoning, compare both returned values with the request, and bind the runtime to one formal `worker-N`. An accepted request, echoed input, success flag, runtime nickname, or undocumented assumption is not effective-route evidence.
+- Missing, rejected, ignored, or contradictory actual/effective metadata fails closed before substantive Worker work. Determine this capability from the host contract before spawning when possible; if a purportedly attested spawn omits the evidence, stop that runtime. The Worker must not introspect or recursively self-prove its own route—the Lead verifies native evidence, while a manual Worker uses its host-owned current-conversation selector.
+- If the host cannot provide that native attestation, PROJECT_LEAD **MUST NOT** spawn a Worker and **MUST NOT** perform the assignment on Sol as a fallback. Stop the turn and tell the Owner to create or select a top-level economy Worker manually using the profile's model/reasoning and `$tao continue worker-N`. In that manual conversation, the host's current-conversation model/reasoning selector is the routing evidence. Never demand another manual Worker as a second proof. If the selector shows the correct model but lower reasoning, ask the Owner to change the same conversation to the required setting and continue it.
+- Routing evidence and billing evidence are separate. Neither a native effective-route attestation nor a manual selector proves token/credit attribution. TAO may report per-tier tokens, credits, or savings only from host per-model/per-conversation telemetry or a documented manual measurement; otherwise mark attribution unknown and make no savings claim.
+- Apply the same explicit-route, attestation, and manual-fallback gate to escalated Workers and Reviewers so they cannot silently inherit Sol.
 - A native subagent is only a Worker runtime; it remains bound by `TASK.md`, scope, status, dependencies, ownership, and the single-writer protocol. The host's multi-agent capability never justifies fan-out.
 - After dispatching a Worker, **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout and re-analyze, duplicate the assignment, or perform the Worker's execution. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resume on a completion, blocker, milestone, or Owner event. For a manually opened Worker, end the Lead turn and wait for the Owner to return with `continue`.
 
@@ -102,7 +104,7 @@ Then work independently through implementation and validation. Update only the W
 
 When the assignment is done, set the status to `completed` and return control to the Lead. Do not create or request a new Worker for the next milestone. The Lead may archive this assignment and reset the same Worker to `ready`; the Owner then continues the original Worker conversation with `$tao continue worker-N`.
 
-If a native runtime exits or the process crashes, repository status remains authoritative. Resume the same formal Worker and current assignment from `ready`, `active`, `blocked`, or `waiting-owner`; do not add a Worker or let PROJECT_LEAD duplicate its execution. `statectl.py` automatically resumes interrupted reassignment and review-assignment transactions and refuses to overwrite newer conflicting files.
+If a native runtime exits or the process crashes, repository status remains authoritative. Resume or rebind the same formal Worker and current assignment from `ready`, `active`, `blocked`, or `waiting-owner`; do not add a Worker or let PROJECT_LEAD duplicate its execution. `statectl.py` atomically publishes initialization and automatically resumes interrupted Worker registration, reassignment, and review-assignment transactions while refusing to overwrite newer conflicting files.
 
 Apply clear local Owner corrections directly when scope and intent are unambiguous. For ambiguous, directional, or architecture-changing feedback, preserve the Owner's exact words with `statectl.py record-owner-feedback`, pause conflicting work, and direct the Owner back to the original Project Lead conversation.
 
@@ -110,7 +112,9 @@ When blocked, follow [escalation and review](references/escalation-and-review.md
 
 ## Reviewer workflow
 
-Proceed only when `STATE.json` requests review and `review/TASK.md` names the reviewer. Read the review task, relevant diff, completion criteria, and validation evidence. Do not broaden implementation scope.
+Proceed only when `STATE.json` requests review and `review/TASK.md` names the reviewer. Read the review task, relevant diff, completion criteria, and validation evidence. Do not broaden implementation scope. A strong-tier review requires an explicit high-risk justification; ordinary review stays below strong.
+
+Before a native Reviewer starts, apply the same route-attestation gate as a Worker using the profile's configured review model and reasoning. If native effective metadata is unavailable, use a manually selected top-level Reviewer conversation; never let the Reviewer silently inherit the Project Lead model.
 
 Write findings and evidence to `review/REPORT.md` and update `review/STATUS.json`. Approve, request bounded fixes, or escalate a decision to PROJECT_LEAD. Never invent release approval when validation is incomplete.
 

@@ -6,7 +6,7 @@
 
 One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.4.0 · Apache-2.0 · Benchmark pending
+> Project status: v0.4.1 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -32,7 +32,7 @@ The Lead distills expensive reasoning into a compact plan and bounded assignment
 
 TAO optimizes for correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. The goal is value per completed task—not the lowest single-run cost. Sol is reserved for ambiguity, architecture, major decisions, high-risk blockers, and final acceptance. Luna/xhigh Workers perform ordinary searches, environment checks, implementation, experiments, tests, debugging, data/video processing, remote operations, and result packaging; spending more Luna reasoning tokens is acceptable when it avoids rework.
 
-This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower reasoning merely to save a small one-off cost. When Codex native subagent dispatch supports an explicit model, the Lead must pass `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` (or the host equivalent). A successful structured host receipt is evidence when the tool contract guarantees accepted overrides; stronger actual/effective metadata must agree. Unsupported, rejected, ignored, or contradictory routing fails closed. A free-form `Worker luna` nickname is not evidence, but the Worker never recursively re-proves a route already guaranteed by the host. For a manually opened Worker, the host's current-conversation selector is evidence: `极高` means `xhigh`, while `高` means `high`; `5.6 Luna / 极高` passes and must never be misreported as high. A Luna capability gap escalates first to `gpt-5.6-terra / high` or `xhigh`; Sol is used only for architecture, major decisions, high-risk blockers, or when Terra remains insufficient.
+This routing is a hard constraint. Ordinary execution defaults directly to `gpt-5.6-luna / xhigh`; do not lower reasoning merely to save a small one-off cost. Native dispatch is allowed only when the host accepts explicit `model: "gpt-5.6-luna"` and `reasoning_effort: "xhigh"` **and returns machine-readable actual/effective values for both**. Acceptance, echoed request fields, a success flag, or a nickname is not proof. Missing or contradictory metadata fails closed before substantive work, and Sol must not absorb the assignment. Use a manually selected top-level Worker instead. Its host selector is routing evidence: `极高` means `xhigh`, while `高` means `high`; `5.6 Luna / 极高` passes and must never be misreported as high. Route proof is not billing proof: Luna token/credit attribution requires host per-model/per-conversation telemetry or a documented manual measurement. The same gate applies to Terra escalations and Reviewers so they cannot silently inherit Sol.
 
 ## What it does
 
@@ -43,6 +43,8 @@ This routing is a hard constraint. Ordinary execution defaults directly to `gpt-
 - Archives completed assignments before reusing the stable Worker ID, so old task evidence is never silently overwritten.
 - Reopens a completed project only for actionable Owner work, after archiving an immutable completion snapshot.
 - Separates global Lead-owned state from Worker-owned status to avoid concurrent write conflicts.
+- Treats review as a synchronization barrier and invalidates completed review evidence whenever execution resumes.
+- Requires an explicit high-risk justification before assigning a strong-tier review.
 - Escalates decisions and ambiguous intent instead of turning the Owner into a message bus.
 - Loads context progressively so Workers do not pay to read the Lead's entire exploration.
 - Adds deterministic, dependency-free state validation and management summaries.
@@ -126,7 +128,7 @@ $tao continue worker-2
 
 ### Dispatch lifecycle
 
-Ideal native-dispatch mode:
+Ideal native-dispatch mode, available only when the returned receipt attests actual/effective model and reasoning:
 
 ```text
 Owner
@@ -146,7 +148,7 @@ Sol reads the summary and chooses the next stage
 Lead reassigns the same worker-1
 ```
 
-When explicit economy routing is unsupported, rejected, or contradicted by effective metadata:
+When effective model/reasoning metadata is missing, unsupported, rejected, or contradictory:
 
 ```text
 Sol Project Lead prepares worker-1 and stops any unverified native Worker
@@ -157,7 +159,7 @@ Owner opens gpt-5.6-luna / xhigh and sends:
 $tao continue worker-1
 ```
 
-The manual conversation's host selector is the verification boundary; it must not request another manual Worker as proof. If the same conversation is Luna/high, switch that conversation to xhigh and continue it. TAO does not continuously poll or duplicate Worker work after dispatch. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
+The manual conversation's host selector is the routing boundary; it must not request another manual Worker as proof. If the same conversation is Luna/high, switch that conversation to xhigh and continue it. Billing attribution still requires host telemetry or documented manual measurement. TAO does not continuously poll or duplicate Worker work after dispatch; one unchanged passive-wait timeout ends the wait without another Sol analysis loop. Repeated identical Luna failures stop and escalate to Terra instead of retrying the same plan.
 
 ## Commands
 
@@ -259,16 +261,16 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-The test suite covers initialization without overwrite, completed-project reopen/history, schema and path safety, crash-recoverable Worker/Review reassignment, reusable Workers, dependency and glob-scope conflicts, stale-review prevention, verbatim Owner feedback, explicit activation/model-routing contracts, all A–M behavior contracts, and benchmark aggregation.
+The test suite covers atomic initialization, crash-recoverable Worker registration/reassignment/Review assignment, completed-project reopen/history, schema and path safety, reusable Workers, dependency and literal/glob-scope conflicts, stale-review prevention, verbatim Owner feedback, explicit activation/model-routing contracts, all A–O behavior contracts, and benchmark attribution/aggregation.
 
 ## Compatibility and current limitations
 
 - Requires conversations to share a writable repository.
 - The Owner manually opens model-specific top-level conversations in v1.
 - Repository state can resume a formal Worker after a lost host conversation, but TAO cannot resurrect the host conversation object itself.
-- Reopen, Worker reassignment, and Review assignment are crash-recoverable. A process crash during first-time `init` or `add-worker` may still require manual cleanup of an unregistered partial directory; the helper fails closed instead of deleting it automatically.
+- Initialization is atomically published; Worker registration, reopen, Worker reassignment, and Review assignment are crash-recoverable. Old partial runtimes created by earlier releases remain fail-closed and require deliberate manual inspection.
 - Model and reasoning labels vary across hosts; use the generic profile when needed.
-- Token and credit telemetry must come from the host or documented manual measurements.
+- Model selectors and effective metadata prove routing, not billing. Token and credit attribution must come from host per-model/per-conversation telemetry or documented manual measurements; otherwise it remains unknown.
 - SkillsMP independently scans public GitHub repositories on its own schedule; repository publication cannot guarantee immediate indexing.
 
 This structure follows the [Agent Skills specification](https://agentskills.io/specification) and [official OpenAI documentation for building skills](https://learn.chatgpt.com/docs/build-skills). The current OpenAI mapping follows [official model guidance](https://learn.chatgpt.com/docs/models).

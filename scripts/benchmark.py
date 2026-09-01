@@ -20,6 +20,10 @@ NONNEGATIVE_INTEGERS = {
     "escalations",
     "user_interventions",
 }
+MEASUREMENT_SOURCES = {
+    "host-per-model-telemetry",
+    "documented-manual-per-conversation",
+}
 
 
 class BenchmarkError(RuntimeError):
@@ -60,7 +64,10 @@ def validate_record(record: dict[str, Any]) -> list[str]:
         "success",
         "test_pass_rate",
         "tokens",
+        "measurement_source",
+        "measurement_evidence",
         "estimated_cost",
+        "credits_used",
         "duration_seconds",
         "model_switches",
         "worker_threads",
@@ -78,8 +85,8 @@ def validate_record(record: dict[str, Any]) -> list[str]:
         errors.append("unknown fields: " + ", ".join(extra))
     if missing:
         return errors
-    if record["schema_version"] != 1:
-        errors.append("schema_version must be 1")
+    if record["schema_version"] != 2:
+        errors.append("schema_version must be 2")
     if not isinstance(record["task_id"], str) or not record["task_id"].strip():
         errors.append("task_id must be a non-empty string")
     if record["strategy"] not in STRATEGIES:
@@ -107,6 +114,19 @@ def validate_record(record: dict[str, Any]) -> list[str]:
         isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost < 0
     ):
         errors.append("estimated_cost must be null or a non-negative number")
+    credits = record["credits_used"]
+    if credits is not None and (
+        isinstance(credits, bool) or not isinstance(credits, (int, float)) or credits < 0
+    ):
+        errors.append("credits_used must be null or a non-negative number")
+    if not isinstance(record["measurement_source"], str) or record[
+        "measurement_source"
+    ] not in MEASUREMENT_SOURCES:
+        errors.append("measurement_source must identify attributable host or manual telemetry")
+    if not isinstance(record["measurement_evidence"], str) or not record[
+        "measurement_evidence"
+    ].strip():
+        errors.append("measurement_evidence must be a non-empty string")
     duration = record["duration_seconds"]
     if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
         errors.append("duration_seconds must be a non-negative number")
@@ -126,6 +146,7 @@ def mean(records: list[dict[str, Any]], getter) -> float:
 
 def strategy_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     costs = [record["estimated_cost"] for record in records if record["estimated_cost"] is not None]
+    credits = [record["credits_used"] for record in records if record["credits_used"] is not None]
     return {
         "runs": len(records),
         "success_rate": mean(records, lambda item: 1.0 if item["success"] else 0.0),
@@ -135,6 +156,7 @@ def strategy_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
             for key in sorted(TOKEN_KEYS)
         },
         "estimated_cost": float(statistics.fmean(costs)) if costs else None,
+        "credits_used": float(statistics.fmean(credits)) if credits else None,
         "duration_seconds": mean(records, lambda item: item["duration_seconds"]),
         "model_switches": mean(records, lambda item: item["model_switches"]),
         "worker_threads": mean(records, lambda item: item["worker_threads"]),
@@ -177,7 +199,7 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         else None
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "paired_task_ids": paired_task_ids,
         "strategies": summaries,
         "delta_tiered_minus_strong_only": {
@@ -186,6 +208,11 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
             "total_tokens": tiered["tokens"]["total"] - baseline["tokens"]["total"],
             "strong_tokens": tiered["tokens"]["strong"] - baseline["tokens"]["strong"],
             "duration_seconds": tiered["duration_seconds"] - baseline["duration_seconds"],
+            "credits_used": (
+                tiered["credits_used"] - baseline["credits_used"]
+                if tiered["credits_used"] is not None and baseline["credits_used"] is not None
+                else None
+            ),
             "model_switches": tiered["model_switches"] - baseline["model_switches"],
             "user_interventions": tiered["user_interventions"] - baseline["user_interventions"],
             "strong_token_reduction_ratio": reduction,

@@ -38,19 +38,25 @@ Workers stop instead of repeating the same failure path without new evidence. A 
 
 A Reviewer evaluates a bounded change against explicit criteria and evidence. Balanced review is the default for medium or large work. Strong review is reserved for high-risk, architecture-heavy, algorithmic, or multi-Worker integration changes.
 
+Every strong-tier review records a concrete justification in the review assignment. Convenience, availability, or an unavailable balanced runtime is not enough; use the manual balanced/Terra fallback rather than silently spending Sol.
+
+Review is a synchronization barrier. Do not add Workers or return to execution while the assigned review is unfinished. Returning to execution after a completed review detaches that approval while preserving the review requirement, so later completion requires fresh review evidence.
+
 ## Worker dispatch and event handoff
 
 Codex native subagents may host TAO Workers, but only under all of these conditions:
 
-- the host reliably supports an explicit model parameter;
+- the host reliably supports explicit model and reasoning parameters and promises machine-readable actual/effective route metadata for the created runtime;
 - the dispatch **MUST** explicitly select the configured economy model with `xhigh` reasoning; omitting `model` is forbidden;
-- after dispatch, the Lead verifies the actual/effective route from the structured host receipt or stronger effective-model metadata. A successful structured call is sufficient when the host contract guarantees the accepted `model` and reasoning overrides. If fields are unsupported/rejected or returned effective metadata contradicts them, the Lead stops the Worker and fails closed. The Worker never performs recursive self-verification of an already confirmed host route;
+- after dispatch, the Lead verifies that the returned actual/effective model and reasoning both match the request. Acceptance, echoed request fields, a success flag, and a nickname are insufficient. Missing, unsupported, rejected, ignored, or contradictory evidence fails closed before substantive work. The Worker never performs recursive self-verification; native verification belongs to the Lead and host receipt;
 - the subagent is registered as one formal `worker-N` and follows its `TASK.md`, scope, status, dependencies, and ownership rules;
 - fan-out remains subject to the parallelization gate and is never automatic merely because the host supports multi-agent execution.
 
-If the host cannot reliably select or confirm the economy model, PROJECT_LEAD **MUST NOT** spawn a subagent. It stops and instructs the Owner to manually open the economy model at its configured `xhigh` reasoning and send `$tao continue worker-N`. The manual conversation's host-owned current model/reasoning selector is the verification boundary; it must not demand a second manual Worker as proof. A lower reasoning setting is corrected in the same conversation. An unavailable value is reported as unknown, never guessed.
+If the host cannot reliably select and attest the economy model, PROJECT_LEAD **MUST NOT** spawn a subagent and **MUST NOT** execute the assignment on the strong model. It stops and instructs the Owner to manually open the economy model at its configured `xhigh` reasoning and send `$tao continue worker-N`. The manual conversation's host-owned current model/reasoning selector is the routing boundary; it must not demand a second manual Worker as proof. A lower reasoning setting is corrected in the same conversation. An unavailable value is reported as unknown, never guessed.
 
-After dispatching, PROJECT_LEAD **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout then re-analyze, prompt the Worker, duplicate its task, or implement its assignment in parallel. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resumes for a completion, blocker, milestone event, or Owner event. With a manually opened Worker conversation, the Lead ends its turn and waits for the Owner to return with `continue`.
+Route evidence does not prove billing attribution. Per-tier token, credit, cost, or savings claims require host per-model/per-conversation telemetry or a documented manual measurement. If that evidence is unavailable, report attribution as unknown. The same native-attestation and manual-fallback gate applies to escalated Workers and Reviewers; neither may silently inherit the Project Lead model.
+
+After dispatching, PROJECT_LEAD **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout then re-analyze, prompt the Worker, duplicate its task, or implement its assignment in parallel. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress; one unchanged timeout ends the wait without a repository reread or another strong-model analysis loop. It resumes for a completion, blocker, milestone event, or Owner event. With a manually opened Worker conversation, the Lead ends its turn and waits for the Owner to return with `continue`.
 
 ## Instruction priority
 
@@ -119,7 +125,7 @@ Read repository instructions, relevant entrypoints, current validation, and enou
 
 Read global state, active statuses, pending Owner feedback, blockers, and the handoff. Inspect code and diffs only for discrepancies, decisions, or review.
 
-After a runtime crash or native-agent exit, resume from repository state. A runtime exit does not change Worker status and never authorizes a duplicate Worker or Lead-side implementation. Reassignment and review-assignment commands use durable recovery markers; the next `statectl.py` command finishes a compatible interrupted transaction or refuses to overwrite newer conflicting state.
+After a runtime crash or native-agent exit, resume from repository state. A runtime exit does not change Worker status and never authorizes a duplicate Worker or Lead-side implementation. If the old runtime cannot resume, bind a verified replacement runtime to the same formal Worker or Reviewer ID and current assignment instead of creating a new role. Initialization is published atomically; Worker registration, reassignment, and review assignment use recoverable publication or durable markers. The next `statectl.py` command finishes a compatible interrupted transaction or refuses to overwrite newer conflicting state.
 
 ### Worker
 

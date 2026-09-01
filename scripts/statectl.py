@@ -42,6 +42,7 @@ OWNER_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 ACTIVE_WORKER_STATUSES = {"ready", "active", "blocked", "waiting-owner"}
 REASSIGNMENT_MARKER = ".reassign.json"
 REVIEW_ASSIGNMENT_MARKER = ".assign-review.json"
+ADD_WORKER_MARKER_PREFIX = ".add-worker-"
 
 
 class StateError(RuntimeError):
@@ -183,7 +184,11 @@ def scopes_overlap(left: str, right: str) -> bool:
     left_root, left_glob = scope_root(left)
     right_root, right_glob = scope_root(right)
     if not (left_glob or right_glob):
-        return False
+        return (
+            left_root == right_root
+            or left_root.startswith(right_root + "/")
+            or right_root.startswith(left_root + "/")
+        )
     if (left_glob and not left_root) or (right_glob and not right_root):
         return True
     if not left_root or not right_root:
@@ -690,34 +695,45 @@ def command_init(args: argparse.Namespace) -> int:
             return 0
         raise StateError(f"Refusing to overwrite partial runtime directory: {runtime}")
 
-    (runtime / "workers").mkdir(parents=True)
-    (runtime / "inbox" / "owner").mkdir(parents=True)
-    (runtime / "review").mkdir(parents=True)
+    if not root.is_dir():
+        raise StateError(f"Project root does not exist or is not a directory: {root}")
+    staging = Path(tempfile.mkdtemp(prefix=f"{RUNTIME_NAME}.init-", dir=root))
+    try:
+        (staging / "workers").mkdir()
+        (staging / "inbox" / "owner").mkdir(parents=True)
+        (staging / "review").mkdir()
 
-    now = utc_now()
-    state = read_template_json("STATE.json")
-    state["project_id"] = args.project_id
-    state["profile"] = profile
-    state["last_updated"] = now
-    write_new_json(state_path(runtime), state)
+        now = utc_now()
+        state = read_template_json("STATE.json")
+        state["project_id"] = args.project_id
+        state["profile"] = profile
+        state["last_updated"] = now
+        write_new_json(state_path(staging), state)
 
-    replacements = {"{{PROJECT_ID}}": args.project_id}
-    for source, destination in (
-        ("PLAN.md", runtime / "PLAN.md"),
-        ("OWNER_DIRECTIVES.md", runtime / "OWNER_DIRECTIVES.md"),
-        ("HANDOFF.md", runtime / "HANDOFF.md"),
-        ("review-task.md", runtime / "review" / "TASK.md"),
-        ("review-report.md", runtime / "review" / "REPORT.md"),
-    ):
-        content = read_template_text(source)
-        for old, new in replacements.items():
-            content = content.replace(old, new)
-        write_new_text(destination, content)
+        replacements = {"{{PROJECT_ID}}": args.project_id}
+        for source, destination in (
+            ("PLAN.md", staging / "PLAN.md"),
+            ("OWNER_DIRECTIVES.md", staging / "OWNER_DIRECTIVES.md"),
+            ("HANDOFF.md", staging / "HANDOFF.md"),
+            ("review-task.md", staging / "review" / "TASK.md"),
+            ("review-report.md", staging / "review" / "REPORT.md"),
+        ):
+            content = read_template_text(source)
+            for old, new in replacements.items():
+                content = content.replace(old, new)
+            write_new_text(destination, content)
 
-    review_status = read_template_json("review-status.json")
-    review_status["last_updated"] = now
-    write_new_json(runtime / "review" / "STATUS.json", review_status)
-    assert_valid(runtime)
+        review_status = read_template_json("review-status.json")
+        review_status["last_updated"] = now
+        write_new_json(staging / "review" / "STATUS.json", review_status)
+        assert_valid(staging)
+        if runtime.exists():
+            raise StateError(f"Runtime appeared during initialization: {runtime}")
+        staging.rename(runtime)
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
     print(f"Initialized {runtime}")
     return 0
 
@@ -770,6 +786,125 @@ def build_worker_task(args: argparse.Namespace, assignment_revision: int = 1) ->
     )
 
 
+def add_worker_marker_path(runtime: Path, worker_id: str) -> Path:
+    return runtime / f"{ADD_WORKER_MARKER_PREFIX}{worker_id}.json"
+
+
+def validate_add_worker_marker(value: dict[str, Any], path: Path) -> None:
+    required = {"schema_version", "worker_id", "old_state", "new_state", "files"}
+    if set(value) != required or value.get("schema_version") != SCHEMA_VERSION:
+        raise StateError(f"Invalid pending Worker-add marker: {path}")
+    worker_id = value.get("worker_id")
+    if not isinstance(worker_id, str) or not WORKER_ID_RE.fullmatch(worker_id):
+        raise StateError(f"Invalid Worker in pending add marker: {path}")
+    if path.name != f"{ADD_WORKER_MARKER_PREFIX}{worker_id}.json":
+        raise StateError(f"Pending Worker-add marker has the wrong filename: {path}")
+    files = value.get("files")
+    if not isinstance(files, dict) or set(files) != {"TASK.md", "STATUS.json", "BLOCKER.md"}:
+        raise StateError(f"Invalid files in pending Worker-add marker: {path}")
+    if not all(isinstance(content, str) for content in files.values()):
+        raise StateError(f"Invalid file content in pending Worker-add marker: {path}")
+    try:
+        old_state = json.loads(value["old_state"])
+        new_state = json.loads(value["new_state"])
+        worker_status = json.loads(files["STATUS.json"])
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise StateError(f"Invalid JSON in pending Worker-add marker: {path}") from exc
+    if not all(isinstance(item, dict) for item in (old_state, new_state, worker_status)):
+        raise StateError(f"Invalid objects in pending Worker-add marker: {path}")
+    old_workers = old_state.get("workers")
+    new_workers = new_state.get("workers")
+    if not isinstance(old_workers, list) or not isinstance(new_workers, list):
+        raise StateError(f"Invalid registry in pending Worker-add marker: {path}")
+    immutable_keys = set(old_state) - {"workers", "last_updated", "next_action"}
+    if set(old_state) != set(new_state) or any(
+        old_state[key] != new_state[key] for key in immutable_keys
+    ):
+        raise StateError(f"Pending Worker-add marker changes unrelated project state: {path}")
+    if not check_timestamp(new_state.get("last_updated")) or new_state.get("next_action") != {
+        "actor": "project-lead",
+        "instruction": "Finish assignments, then move the project to execution.",
+    }:
+        raise StateError(f"Pending Worker-add marker has invalid project metadata: {path}")
+    if new_workers[:-1] != old_workers or len(new_workers) != len(old_workers) + 1:
+        raise StateError(f"Pending Worker-add marker does not append exactly one Worker: {path}")
+    entry = new_workers[-1]
+    expected_entry = {
+        "id": worker_id,
+        "task_path": f"workers/{worker_id}/TASK.md",
+        "status_path": f"workers/{worker_id}/STATUS.json",
+    }
+    if not isinstance(entry, dict) or any(entry.get(key) != expected for key, expected in expected_entry.items()):
+        raise StateError(f"Pending Worker-add marker has an invalid registry entry: {path}")
+    if set(entry) != {"id", "task_path", "status_path", "write_scope", "depends_on"}:
+        raise StateError(f"Pending Worker-add marker has invalid registry fields: {path}")
+    if not isinstance(entry["write_scope"], list) or not entry["write_scope"] or not all(
+        isinstance(item, str) and item.strip() for item in entry["write_scope"]
+    ):
+        raise StateError(f"Pending Worker-add marker has invalid write scope: {path}")
+    if not isinstance(entry["depends_on"], list) or not all(
+        isinstance(item, str) and WORKER_ID_RE.fullmatch(item) for item in entry["depends_on"]
+    ):
+        raise StateError(f"Pending Worker-add marker has invalid dependencies: {path}")
+    if worker_id in {item.get("id") for item in old_workers if isinstance(item, dict)}:
+        raise StateError(f"Pending Worker-add marker duplicates an existing Worker: {path}")
+    if validate_status_object(worker_status, worker_id, path) or worker_status.get("status") != "ready":
+        raise StateError(f"Pending Worker-add marker does not publish a ready status: {path}")
+
+
+def recover_add_worker(runtime: Path, marker_path: Path) -> None:
+    marker = read_json(marker_path)
+    validate_add_worker_marker(marker, marker_path)
+    current_state = state_path(runtime).read_text(encoding="utf-8")
+    if current_state not in {marker["old_state"], marker["new_state"]}:
+        raise StateError(
+            "Pending Worker-add marker conflicts with newer STATE.json; refusing to overwrite it"
+        )
+    if current_state == marker["old_state"]:
+        assert_valid(runtime)
+
+    worker_id = marker["worker_id"]
+    worker_dir = runtime / "workers" / worker_id
+    if worker_dir.exists():
+        if not worker_dir.is_dir() or set(path.name for path in worker_dir.iterdir()) != set(
+            marker["files"]
+        ):
+            raise StateError(
+                f"Pending Worker-add marker conflicts with newer {worker_id} content; "
+                "refusing to overwrite it"
+            )
+        for name, content in marker["files"].items():
+            if (worker_dir / name).read_text(encoding="utf-8") != content:
+                raise StateError(
+                    f"Pending Worker-add marker conflicts with newer {worker_id}/{name}; "
+                    "refusing to overwrite it"
+                )
+    else:
+        staging = Path(
+            tempfile.mkdtemp(prefix=f".{worker_id}.add-", dir=runtime / "workers")
+        )
+        try:
+            for name, content in marker["files"].items():
+                write_new_text(staging / name, content)
+            staging.rename(worker_dir)
+        except Exception:
+            if staging.exists():
+                shutil.rmtree(staging)
+            raise
+
+    if current_state == marker["old_state"]:
+        atomic_write_text(state_path(runtime), marker["new_state"])
+    assert_valid(runtime)
+    marker_path.unlink()
+
+
+def recover_pending_worker_additions(runtime: Path) -> None:
+    if not state_path(runtime).is_file():
+        return
+    for marker_path in sorted(runtime.glob(f"{ADD_WORKER_MARKER_PREFIX}*.json")):
+        recover_add_worker(runtime, marker_path)
+
+
 def command_add_worker(args: argparse.Namespace) -> int:
     root = project_root(args.project_root)
     runtime = runtime_dir(root)
@@ -781,6 +916,11 @@ def command_add_worker(args: argparse.Namespace) -> int:
     registry = state["workers"]
     if state["status"] == "complete":
         raise StateError("Cannot add a Worker to a completed project")
+    if state["phase"] == "review":
+        raise StateError(
+            "Cannot add a Worker during review; finish the review and return the project "
+            "to execution first"
+        )
     if any(item["id"] == args.worker_id for item in registry):
         raise StateError(f"Worker already exists: {args.worker_id}")
     known_ids = {item["id"] for item in registry}
@@ -813,20 +953,10 @@ def command_add_worker(args: argparse.Namespace) -> int:
     worker_dir = runtime / "workers" / args.worker_id
     if worker_dir.exists():
         raise StateError(f"Refusing to overwrite existing Worker directory: {worker_dir}")
-    worker_dir.mkdir(parents=True)
-    try:
-        write_new_text(worker_dir / "TASK.md", build_worker_task(args))
-        status = read_template_json("worker-status.json")
-        status["worker_id"] = args.worker_id
-        status["last_updated"] = utc_now()
-        write_new_json(worker_dir / "STATUS.json", status)
-        write_new_text(worker_dir / "BLOCKER.md", read_template_text("blocker.md"))
-    except Exception:
-        for child in worker_dir.iterdir():
-            child.unlink()
-        worker_dir.rmdir()
-        raise
-
+    old_state_text = state_path(runtime).read_text(encoding="utf-8")
+    status = read_template_json("worker-status.json")
+    status["worker_id"] = args.worker_id
+    status["last_updated"] = utc_now()
     registry.append(
         {
             "id": args.worker_id,
@@ -840,7 +970,21 @@ def command_add_worker(args: argparse.Namespace) -> int:
         "actor": "project-lead",
         "instruction": "Finish assignments, then move the project to execution.",
     }
-    save_state(runtime, state)
+    state["last_updated"] = utc_now()
+    marker = {
+        "schema_version": SCHEMA_VERSION,
+        "worker_id": args.worker_id,
+        "old_state": old_state_text,
+        "new_state": json.dumps(state, indent=2, ensure_ascii=False) + "\n",
+        "files": {
+            "TASK.md": build_worker_task(args),
+            "STATUS.json": json.dumps(status, indent=2, ensure_ascii=False) + "\n",
+            "BLOCKER.md": read_template_text("blocker.md"),
+        },
+    }
+    marker_path = add_worker_marker_path(runtime, args.worker_id)
+    atomic_write_json(marker_path, marker)
+    recover_add_worker(runtime, marker_path)
     assert_valid(runtime)
     print(f"Registered {args.worker_id}")
     return 0
@@ -1334,6 +1478,15 @@ def command_set_project(args: argparse.Namespace) -> int:
         not state["review"]["required"] or state["review"]["reviewer_id"] is None
     ):
         raise StateError("Cannot enter review phase without an assigned review")
+    if state["phase"] == "review" and phase == "execution":
+        review_status = read_json(runtime / "review" / "STATUS.json")
+        if (
+            state["review"]["reviewer_id"] is None
+            or review_status["reviewer_id"] != state["review"]["reviewer_id"]
+            or review_status["status"] != "completed"
+        ):
+            raise StateError("Cannot leave review for execution while review is unfinished")
+        state["review"]["reviewer_id"] = None
     if phase == "complete":
         require_completion_ready(runtime, state)
     state["phase"] = phase
@@ -1499,6 +1652,12 @@ def command_assign_review(args: argparse.Namespace) -> int:
         raise StateError("reviewer-id must match reviewer-N with N greater than zero")
     if args.level not in {"balanced", "strong"}:
         raise StateError("Review level must be balanced or strong")
+    if args.level == "strong":
+        strong_justification = require_nonempty(
+            args.strong_justification or "", "strong-justification"
+        )
+    else:
+        strong_justification = args.strong_justification or "Not required."
     state = load_state(runtime)
     if state["status"] == "complete":
         raise StateError("Cannot assign review to a completed project")
@@ -1526,6 +1685,7 @@ def command_assign_review(args: argparse.Namespace) -> int:
         f"# Review Task: {args.reviewer_id}\n\n"
         f"## Objective\n\n{require_nonempty(args.objective, 'objective')}\n\n"
         f"## Review level\n\n{args.level}\n\n"
+        f"## Tier justification\n\n{strong_justification}\n\n"
         f"## Scope\n\n{markdown_list(args.scope)}\n\n"
         f"## Completion criteria\n\n{markdown_list(args.completion_criterion)}\n"
     )
@@ -1877,6 +2037,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--objective", required=True)
     review_parser.add_argument("--scope", action="append", default=[])
     review_parser.add_argument("--completion-criterion", action="append", required=True)
+    review_parser.add_argument("--strong-justification")
     review_parser.set_defaults(func=command_assign_review)
 
     review_status_parser = subparsers.add_parser("set-review-status", help="Update Reviewer-owned status")
@@ -1921,6 +2082,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.command != "init":
             runtime = runtime_dir(project_root(args.project_root))
+            recover_pending_worker_additions(runtime)
             recover_pending_review_assignment(runtime)
             recover_pending_reassignments(runtime)
         return int(args.func(args))

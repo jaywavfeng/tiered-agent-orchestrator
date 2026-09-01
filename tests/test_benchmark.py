@@ -15,7 +15,7 @@ import benchmark  # noqa: E402
 def record(task_id: str, strategy: str, strong: int, economy: int) -> dict:
     total = strong + economy
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "task_id": task_id,
         "strategy": strategy,
         "success": True,
@@ -26,7 +26,10 @@ def record(task_id: str, strategy: str, strong: int, economy: int) -> dict:
             "balanced": 0,
             "economy": economy,
         },
+        "measurement_source": "documented-manual-per-conversation",
+        "measurement_evidence": "Unit-test fixture with explicit per-conversation counts.",
         "estimated_cost": None,
+        "credits_used": None,
         "duration_seconds": 10,
         "model_switches": 0 if strategy == "strong-only" else 1,
         "worker_threads": 0 if strategy == "strong-only" else 1,
@@ -43,6 +46,12 @@ class BenchmarkTests(unittest.TestCase):
         value["tokens"]["total"] = 1
         errors = benchmark.validate_record(value)
         self.assertIn("tokens.total must equal the three tier totals", errors)
+
+    def test_record_requires_attributable_measurement_evidence(self) -> None:
+        value = record("task-a", "tiered", 100, 200)
+        value["measurement_evidence"] = ""
+        errors = benchmark.validate_record(value)
+        self.assertIn("measurement_evidence must be a non-empty string", errors)
 
     def test_aggregate_pairs_tasks_and_computes_reduction(self) -> None:
         values = [

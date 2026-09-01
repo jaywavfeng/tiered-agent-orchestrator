@@ -99,6 +99,22 @@ class StateCtlTests(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertIn("partial runtime", error)
 
+    def test_init_publishes_atomically_without_partial_runtime(self) -> None:
+        original_rename = Path.rename
+
+        def crash_before_publish(path: Path, target: Path) -> Path:
+            if Path(target) == self.root / ".tiered-agent":
+                raise RuntimeError("crash before publish")
+            return original_rename(path, target)
+
+        with mock.patch.object(Path, "rename", crash_before_publish):
+            with self.assertRaisesRegex(RuntimeError, "crash before publish"):
+                self.run_cli(
+                    "init", "--project-id", "sample-project", "--profile", "generic"
+                )
+        self.assertFalse((self.root / ".tiered-agent").exists())
+        self.assertEqual(self.init(), self.root / ".tiered-agent")
+
     def test_worker_registration_status_and_summary(self) -> None:
         runtime = self.init()
         result, _, error = self.add_worker()
@@ -139,6 +155,22 @@ class StateCtlTests(unittest.TestCase):
         self.assertIn("Implementation is underway.", output)
         state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
         self.assertEqual(state["workers"][0]["task_path"], "workers/worker-1/TASK.md")
+
+    def test_add_worker_marker_recovers_after_interruption(self) -> None:
+        runtime = self.init()
+        with mock.patch.object(
+            statectl, "recover_add_worker", side_effect=RuntimeError("crash")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "crash"):
+                self.add_worker()
+        marker = statectl.add_worker_marker_path(runtime, "worker-1")
+        self.assertTrue(marker.is_file())
+        self.assertFalse((runtime / "workers" / "worker-1").exists())
+        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertFalse(marker.exists())
+        self.assertTrue((runtime / "workers" / "worker-1" / "TASK.md").is_file())
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertEqual([item["id"] for item in state["workers"]], ["worker-1"])
 
     def test_new_project_does_not_create_meaningless_reviewer(self) -> None:
         runtime = self.init()
@@ -518,6 +550,113 @@ class StateCtlTests(unittest.TestCase):
             0,
         )
         self.assertEqual(self.run_cli("validate")[0], 0)
+
+    def test_review_must_finish_and_be_invalidated_before_execution_resumes(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Implementation completed.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(
+                "assign-review",
+                "--reviewer-id",
+                "reviewer-1",
+                "--level",
+                "balanced",
+                "--objective",
+                "Review implementation.",
+                "--completion-criterion",
+                "Evidence is complete.",
+            )[0],
+            0,
+        )
+        result, _, error = self.run_cli(
+            "set-project", "--phase", "execution", "--status", "active"
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("review is unfinished", error)
+        result, _, error = self.add_worker(
+            "worker-2",
+            "docs/**",
+            "--coordination-justification",
+            "Independent documentation context.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("during review", error)
+        self.assertEqual(
+            self.run_cli(
+                "set-review-status",
+                "--reviewer-id",
+                "reviewer-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Review completed.",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(
+                "set-project", "--phase", "execution", "--status", "active"
+            )[0],
+            0,
+        )
+        state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["review"]["required"])
+        self.assertIsNone(state["review"]["reviewer_id"])
+        result, _, error = self.run_cli(
+            "set-project", "--phase", "complete", "--status", "complete"
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("required review is unfinished or stale", error)
+
+    def test_strong_review_requires_explicit_value_justification(self) -> None:
+        runtime = self.init()
+        self.assertEqual(self.add_worker()[0], 0)
+        self.assertEqual(
+            self.run_cli(
+                "set-worker-status",
+                "--worker-id",
+                "worker-1",
+                "--status",
+                "completed",
+                "--summary",
+                "Implementation completed.",
+            )[0],
+            0,
+        )
+        base = (
+            "assign-review",
+            "--reviewer-id",
+            "reviewer-1",
+            "--level",
+            "strong",
+            "--objective",
+            "Review high-risk integration.",
+            "--completion-criterion",
+            "Security and integration evidence is complete.",
+        )
+        result, _, error = self.run_cli(*base)
+        self.assertEqual(result, 2)
+        self.assertIn("strong-justification", error)
+        result, _, error = self.run_cli(
+            *base,
+            "--strong-justification",
+            "The change crosses a security boundary and alters the core protocol.",
+        )
+        self.assertEqual(result, 0, error)
+        task = (runtime / "review" / "TASK.md").read_text(encoding="utf-8")
+        self.assertIn("crosses a security boundary", task)
 
     def test_completed_project_reopens_with_snapshot_and_reuses_worker(self) -> None:
         runtime = self.init()
@@ -1025,6 +1164,18 @@ class StateCtlTests(unittest.TestCase):
             "**",
             "--coordination-justification",
             "This broad scope should still be rejected.",
+        )
+        self.assertEqual(result, 2)
+        self.assertIn("Write scope overlaps", error)
+
+    def test_literal_parent_scope_overlap_is_rejected(self) -> None:
+        self.init()
+        self.assertEqual(self.add_worker("worker-1", "src/adapter")[0], 0)
+        result, _, error = self.add_worker(
+            "worker-2",
+            "src/adapter/generated",
+            "--coordination-justification",
+            "Separate generated-code context.",
         )
         self.assertEqual(result, 2)
         self.assertIn("Write scope overlaps", error)
