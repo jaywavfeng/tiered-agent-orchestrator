@@ -86,6 +86,88 @@ class ForwardScenarioTests(unittest.TestCase):
         self.assertNotIn("chat", json.dumps(state).lower())
         self.assertEqual(state["next_action"]["actor"], "worker-1")
 
+    def test_zero_chat_lead_takeover_recovers_complete_project_picture(self) -> None:
+        runtime = self.init()
+        self.add_worker("worker-1", "src/import/**")
+        self.run_cli(
+            "set-project",
+            "--phase",
+            "execution",
+            "--status",
+            "blocked",
+            "--milestone",
+            "Integrate vendor import API",
+            "--next-actor",
+            "project-lead",
+            "--next-action",
+            "Ask the Owner to choose the documented fallback.",
+        )
+        self.run_cli(
+            "set-worker-status",
+            "--worker-id",
+            "worker-1",
+            "--status",
+            "blocked",
+            "--summary",
+            "Parser is complete; vendor API lacks the required cursor contract.",
+            "--verification",
+            "137 tests passed before the vendor integration blocker.",
+            "--next-action",
+            "Wait for the fallback decision.",
+        )
+        (runtime / "PLAN.md").write_text(
+            "# Project Plan\n\n## Goal\nShip a verified offline import pipeline.\n\n"
+            "## Completion criteria\nAll callers migrate and integration tests pass.\n\n"
+            "## Decisions and constraints\nPreserve the public API and offline mode.\n",
+            encoding="utf-8",
+        )
+        (runtime / "OWNER_DIRECTIVES.md").write_text(
+            "# Owner Directives\n\n## Active directives\nDo not remove offline mode.\n\n"
+            "## Decision needed\nChoose cache fallback A or B.\n",
+            encoding="utf-8",
+        )
+        (runtime / "HANDOFF.md").write_text(
+            "# Lead Handoff\n\n## Final goal\nShip a verified offline import pipeline.\n\n"
+            "## Current position\nVendor integration is blocked after parser completion.\n\n"
+            "## Completed\nParser and caller migration.\n\n## Active roles\nworker-1 is blocked.\n\n"
+            "## Verified results\n137 tests passed.\n\n## Important decisions and constraints\n"
+            "Preserve offline mode.\n\n## Blockers and risks\nVendor cursor contract is absent.\n\n"
+            "## Next action\nChoose a cache fallback.\n\n## Owner decision\nFallback A or B.\n",
+            encoding="utf-8",
+        )
+        blocker = runtime / "workers" / "worker-1" / "BLOCKER.md"
+        blocker.write_text(
+            "# Blocker\n\n## Summary\nVendor cursor contract is absent.\n\n"
+            "## Decision needed\nChoose cache fallback A or B.\n",
+            encoding="utf-8",
+        )
+
+        # Simulate a fresh account: reconstruction reads repository files only.
+        repository_context = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                runtime / "STATE.json",
+                runtime / "HANDOFF.md",
+                runtime / "OWNER_DIRECTIVES.md",
+                runtime / "PLAN.md",
+                runtime / "workers" / "worker-1" / "STATUS.json",
+                blocker,
+            )
+        )
+        for fact in (
+            "Ship a verified offline import pipeline",
+            "Parser and caller migration",
+            "Vendor integration is blocked",
+            '"status": "blocked"',
+            "Preserve offline mode",
+            "137 tests passed",
+            "Vendor cursor contract is absent",
+            "Choose a cache fallback",
+            "Fallback A or B",
+        ):
+            self.assertIn(fact, repository_context)
+        self.assertNotIn("previous conversation", repository_context.lower())
+
     def test_blocker_and_ambiguous_feedback_preserve_evidence(self) -> None:
         runtime = self.init()
         self.add_worker("worker-1", "src/import/**")

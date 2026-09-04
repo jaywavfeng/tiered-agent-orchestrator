@@ -10,6 +10,10 @@ TAO runs only when the current Owner request explicitly invokes `$tao`. Existing
 
 > **Use the cheapest model that is likely to complete the task correctly without costly rework.**
 
+> **Correct completion first, then maximize useful work per token/credit.**
+
+> **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
+
 Optimize for completion-value efficiency, not the lowest single-run cost. Correct completion is the first priority. The next priorities are reducing strong-model usage, reducing credits and cost, avoiding unnecessary context loading and model switches, and only then reducing total token count. Economy execution may use more reasoning tokens when that materially reduces rework, escalations, or credits.
 
 Model tiers are hard routing constraints, not suggestions. PROJECT_LEAD reserves the strong tier for ambiguous intent, architecture, decomposition, major decisions, difficult blockers, and final acceptance. WORKER handles routine execution on the economy tier at the configured highest practical reasoning effort; do not reduce reasoning merely to shave a small per-run cost. REVIEWER defaults to balanced or another tier below strong; strong review is reserved for genuine high-risk architecture, algorithm, security, or integration decisions. Exact host mappings live in the selected profile.
@@ -26,7 +30,7 @@ The Project Lead is the long-lived management conversation. It interprets ambigu
 
 PROJECT_LEAD **MUST NOT** broadly scan the repository, perform routine SSH login or GPU/disk/environment checks (including `nvidia-smi`), install dependencies, run training or ordinary tests, write substantial implementation code, debug routine failures, process video/data, generate charts, deploy, repeat shell commands, or otherwise substitute for a Worker. Only a minimal read-only check required for an architecture decision is allowed.
 
-The Lead is event-driven. It does not supervise every implementation step.
+The Lead is event-driven. It does not supervise every implementation step. It also does not run periodic comprehensive audits, security sweeps, or state-consistency scans without evidence of a problem.
 
 ### WORKER
 
@@ -71,6 +75,19 @@ Apply instructions in this order:
 5. Previous agent assumptions
 
 Never use an older plan to override a newer Owner decision.
+
+## Zero-context Lead takeover
+
+Previous chat history is optional memory, never a required project input. On `$tao continue lead`, a fresh Project Lead restores the project from repository state in a fixed, bounded order:
+
+1. `STATE.json` for phase, status, milestone, registered Workers, review requirement, and next actor;
+2. `HANDOFF.md` for the current project-wide cold-start packet;
+3. current `OWNER_DIRECTIVES.md` and the relevant stable sections of `PLAN.md`;
+4. current Worker/Reviewer status, active blockers, and pending Owner events.
+
+Before dispatch, the Lead verifies that this state set identifies the final goal, completed work, current position, role states, durable decisions and constraints, verified results, blockers, next action, and any Owner decision. Repair a missing item in its canonical file; never ask the Owner to reconstruct the old conversation.
+
+`OWNER_STATUS.md` is separate: it is the concise human management report. It helps the Owner understand the project but never overrides machine state or the Lead handoff.
 
 ## Worker reuse and parallelization gate
 
@@ -125,9 +142,9 @@ Read repository instructions, relevant entrypoints, current validation, and enou
 
 ### Returning Project Lead
 
-Read global state, active statuses, pending Owner feedback, blockers, and the handoff. Inspect code and diffs only for discrepancies, decisions, or review.
+Read global state and the handoff first, then current directives, relevant plan sections, active statuses, blockers, and pending Owner feedback. Inspect code, diffs, or history only for a specific discrepancy, decision, or justified review. Do not start with a repository-wide audit.
 
-After a runtime crash or native-agent exit, resume from repository state. A runtime exit does not change Worker status and never authorizes a duplicate Worker or Lead-side implementation. If the old runtime cannot resume, bind a verified replacement runtime to the same formal Worker or Reviewer ID and current assignment instead of creating a new role. Initialization is published atomically; Worker registration, reassignment, and review assignment use recoverable publication or durable markers. The next `statectl.py` command finishes a compatible interrupted transaction or refuses to overwrite newer conflicting state.
+After a runtime crash or native-agent exit, resume from repository state. A runtime exit does not change Worker status and never authorizes a duplicate Worker or Lead-side implementation. If the old runtime cannot resume, bind a verified replacement runtime to the same formal Worker or Reviewer ID and current assignment instead of creating a new role. Run ordinary validation once; inspect recovery details only when a concrete error identifies a conflicting file.
 
 ### Worker
 
@@ -160,3 +177,9 @@ Use these project statuses:
 - `complete`: no required work remains.
 
 Wake the Project Lead only for a milestone, blocker, high-level Owner feedback, invalidated plan, ownership conflict, justified review, or final completion.
+
+## State maintenance and defensive budget
+
+Update repository state at meaningful transitions, not after commands. Keep stable intent in `PLAN.md`, authoritative Owner direction in `OWNER_DIRECTIVES.md`, scoped technical evidence in role status/blocker/report files, and the current takeover digest in `HANDOFF.md`. Refresh `OWNER_STATUS.md` only when the Owner-visible project picture changes.
+
+Do not add a gate, checksum, hash, marker, audit, consistency layer, or elaborate recovery path for a merely imaginable edge case. Additional protection needs a concrete and materially harmful failure mode plus a clear net benefit after implementation complexity, maintenance, context load, and token cost. Prefer simple state, atomic writes, basic validation, and targeted rereading. Once reliability is sufficient for the actual project, return to useful work.

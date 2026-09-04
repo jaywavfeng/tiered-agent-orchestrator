@@ -715,6 +715,7 @@ def command_init(args: argparse.Namespace) -> int:
             ("PLAN.md", staging / "PLAN.md"),
             ("OWNER_DIRECTIVES.md", staging / "OWNER_DIRECTIVES.md"),
             ("HANDOFF.md", staging / "HANDOFF.md"),
+            ("OWNER_STATUS.md", staging / "OWNER_STATUS.md"),
             ("review-task.md", staging / "review" / "TASK.md"),
             ("review-report.md", staging / "review" / "REPORT.md"),
         ):
@@ -1354,6 +1355,12 @@ def archive_project_completion(runtime: Path, reason: str) -> int:
     try:
         for name in ("STATE.json", "PLAN.md", "OWNER_DIRECTIVES.md", "HANDOFF.md"):
             write_new_text(temporary / name, (runtime / name).read_text(encoding="utf-8"))
+        owner_status = runtime / "OWNER_STATUS.md"
+        if owner_status.is_file():
+            write_new_text(
+                temporary / "OWNER_STATUS.md",
+                owner_status.read_text(encoding="utf-8"),
+            )
         for worker in state["workers"]:
             task = checked_relative_path(runtime, worker["task_path"], "worker.task_path")
             status = checked_relative_path(runtime, worker["status_path"], "worker.status_path")
@@ -1897,6 +1904,7 @@ def status_snapshot(runtime: Path) -> dict[str, Any]:
             ),
         },
         "completion_history": len(completion_history_revisions(runtime)),
+        "owner_status": "OWNER_STATUS.md" if (runtime / "OWNER_STATUS.md").is_file() else None,
         "pending_owner_feedback": len(pending_owner_events(runtime)),
         "next_action": state["next_action"],
         "last_updated": state["last_updated"],
@@ -1928,6 +1936,14 @@ def render_status(snapshot: dict[str, Any]) -> str:
     )
     lines.append(f"Pending Owner feedback: {snapshot['pending_owner_feedback']}")
     lines.append(f"Prior completions: {snapshot['completion_history']}")
+    lines.append(
+        "Owner summary: "
+        + (
+            f".tiered-agent/{snapshot['owner_status']}"
+            if snapshot["owner_status"]
+            else "not created yet; create it at the next meaningful transition"
+        )
+    )
     next_action = snapshot["next_action"]
     lines.append(f"Next: {next_action['actor']} — {next_action['instruction']}")
     return "\n".join(lines)

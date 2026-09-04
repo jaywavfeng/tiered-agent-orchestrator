@@ -1,6 +1,6 @@
 # OpenAI Codex Profile
 
-This profile maps abstract orchestration roles to the current OpenAI Codex model family. For v0.4.2, model routing is a hard completion-value constraint: use the cheapest model likely to finish correctly without costly rework. These are the required defaults when the host exposes the corresponding models.
+This profile maps abstract orchestration roles to the current OpenAI Codex model family. For v0.5.0, model routing is a hard completion-value constraint: use the cheapest model likely to finish correctly without costly rework. These are the required defaults when the host exposes the corresponding models.
 
 > **Use the cheapest model that is likely to complete the task correctly without costly rework.**
 

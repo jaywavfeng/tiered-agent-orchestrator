@@ -2,11 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**使用最有可能正确完成任务且不会造成昂贵返工的最低成本模型，并让项目状态跨 Agent 对话持续存在。**
+**先正确完成，再最大化每个 Token/Credit 的有效工作量。使用最可能正确完成且不会造成昂贵返工的最低成本模型，并让项目在零聊天记录下仍可恢复。**
 
 一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
 
-> 项目状态：v0.4.2 · Apache-2.0 · Benchmark pending
+> 项目状态：v0.5.0 · Apache-2.0 · Benchmark pending
 
 ## 为什么需要它
 
@@ -22,7 +22,7 @@ OWNER
         └── REVIEWER（balanced 或 strong，仅在值得时）
 ```
 
-Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完成大部分实现。运行状态保存在 `.tiered-agent/`，所以全新对话不依赖聊天历史也能接班。
+Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完成大部分实现。运行状态保存在 `.tiered-agent/`，所以切换账号或新开完全空白的 Lead 也能接班。`HANDOFF.md` 是 Lead 的 cold-start 接班包，`OWNER_STATUS.md` 是独立的人类项目经理汇报。
 
 **你不需要复制任何上一段聊天内容。**
 
@@ -47,6 +47,9 @@ TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，�
 - 分配 strong-tier Review 前必须记录明确的高风险理由。
 - 升级的是决策和模糊意图，而不是让 Owner 人工搬运消息。
 - 按角色渐进加载上下文，Worker 不读取 Lead 的全部探索过程。
+- 支持新 Lead 用 `$tao continue lead` 在零聊天上下文下按固定、有限顺序接班。
+- 提供简洁的 `OWNER_STATUS.md`，不把给人看的汇报混进机器状态。
+- 优先对现实 failure mode 足够可靠的最简单机制，拒绝推测性的防御层。
 - 提供无第三方依赖的状态校验、状态转换和管理汇总。
 - 提供成对 benchmark 工具，但不发布未经真实测量的节省结论。
 
@@ -126,6 +129,18 @@ $tao continue worker-1
 $tao continue worker-2
 ```
 
+### 零聊天上下文 Lead 接班
+
+切换 Codex 账号，或在完全没有旧消息的新 strong-model 对话中进入同一个仓库，发送：
+
+```text
+$tao continue lead
+```
+
+新 Lead 不需要 Owner 复述项目。它先读 `STATE.json` 和 `HANDOFF.md`，再读当前 `OWNER_DIRECTIVES.md`、`PLAN.md` 的相关稳定章节，以及活跃 Worker/Reviewer 状态与 blocker。这组有限状态必须能回答：最终目标、已完成工作、当前位置、各角色状态、重要决策和约束、已验证结果、blocker、下一步，以及是否需要 Owner 决定。只有这些证据指出具体矛盾时，才读取代码、diff 或历史归档。
+
+Owner 平时直接打开 `.tiered-agent/OWNER_STATUS.md` 看人类可读全局汇报。它只在 milestone、blocker、重要结果/风险变化、completion、reopen 或 Owner 决策变化时更新，不在每条命令后更新。
+
 ### Dispatch 生命周期
 
 理想的原生模式（仅限返回回执证明 actual/effective model 与 reasoning 的宿主）：
@@ -168,8 +183,8 @@ $tao continue worker-1
 | `$tao <目标>` | 先做复杂度门控，只为合适的工作初始化 Project Lead |
 | `$tao continue worker-1` | 仅凭仓库状态继续一个明确 Worker |
 | `$tao continue reviewer-1` | 继续 Lead 明确创建的 Review |
-| `$tao status` | 汇总 Workers、Review、blockers、风险和下一角色 |
-| `$tao continue lead` | 让原 Project Lead 与最新仓库状态重新同步 |
+| `$tao status` | 汇总机器/角色状态并指向 Owner 汇报 |
+| `$tao continue lead` | 让任何新旧 Lead 仅凭仓库状态 cold-start 或重新同步 |
 
 简单、局部、低风险任务由当前 Agent 直接完成，不创建完整组织状态。
 
@@ -181,6 +196,7 @@ $tao continue worker-1
 ├── PLAN.md
 ├── OWNER_DIRECTIVES.md
 ├── HANDOFF.md
+├── OWNER_STATUS.md
 ├── inbox/owner/<event-id>.md
 ├── history/completion-<revision>/
 │   └── 完整的全局、Worker 与 Review 完成快照
@@ -199,13 +215,15 @@ $tao continue worker-1
     └── history/review-<revision>/
 ```
 
-`STATE.json` 保持很小，不保存聊天记录、隐藏推理、secret、终端历史或具体模型名。`PLAN.md` 保存正式决策而不是思维过程，`HANDOFF.md` 只保存下一角色必须知道的内容。
+`STATE.json` 保持很小，不保存聊天记录、隐藏推理、secret、终端历史或具体模型名。`PLAN.md` 是最终目标、完成标准、决策、约束、milestones、分工和验证策略的稳定来源；`OWNER_DIRECTIVES.md` 保存当前有效的 Owner 方向；Worker/Reviewer 文件保存局部技术证据；`HANDOFF.md` 是精简的 Lead cold-start 接班包；`OWNER_STATUS.md` 是派生的人类汇报，不能覆盖机器权威状态。
+
+每个事实只在其权威文件记录一次。摘要负责压缩和指向细节，不复制技术流水账；只在 meaningful transition 更新。
 
 全局状态、计划、正式 Owner 指令、任务分配和 assignment 归档只有一个写入者：PROJECT_LEAD。每个 Worker 只能写自己的代码范围、当前状态、blocker 和唯一命名的 Owner 反馈事件。任务完成后，只有 Lead 的 reassignment 事务可以归档这些文件并把 Worker 重置为 `ready`。
 
 ## 状态辅助工具
 
-Python 3.9+ 是唯一运行依赖，工具只使用标准库。初始化不会覆盖已有状态；reopen 会先快照完成项目；Worker 与 Review reassignment 会保留旧证据，并在替换当前状态前恢复任何中断的多文件事务。
+Python 3.9+ 是唯一运行依赖，工具只使用标准库。初始化不会覆盖已有状态；reopen 会快照完成项目；Worker 与 Review reassignment 会保留旧证据。已有 recovery 行为只是脚本内部兼容细节，正常工作不要求 Agent 审计它。
 
 ```console
 python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
@@ -236,6 +254,14 @@ Profile 是可编辑建议。替换具体模型映射不会改变项目持久化
 
 升级策略基于证据，而不是“失败三次必停”。只要每次尝试都验证新的明确假设，Worker 可以继续；当它开始重复同类失败且没有新证据时就停止。
 
+## 足够可靠，而不是防御性表演
+
+> **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
+
+TAO 默认使用简单仓库文件、机器状态的原子替换、基础 schema/reference/ownership 校验，以及真实错误出现后的定向重读。不会为了理论边缘情况要求 Agent 增加 hash、checksum tree、freshness marker、多层 gate、周期审计或 recovery-of-recovery。只有存在具体且影响明显的 failure mode，并且预期收益明显高于代码复杂度、维护、上下文和 Token 成本时，才增加保护。
+
+Lead 不主动做全仓 audit、安全 sweep 或状态一致性扫描。没有问题证据时，应把预算花在推进 Owner 的真实交付物上。
+
 ## Review 策略
 
 低风险且验证充分的工作可以不创建独立 Review。中大型修改通常使用 balanced Reviewer。只有高风险、核心算法、架构、安全或多 Worker 集成任务才使用 strong Reviewer。
@@ -261,14 +287,15 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-测试覆盖原子初始化、可恢复的 Worker 注册/重分配/Review 分配、completed project reopen/history、schema 与路径安全、Worker 复用、依赖与普通路径/glob 写域冲突、陈旧 Review 防护、Owner 原话保存、显式激活与模型路由契约、A–P 行为契约，以及 benchmark 归因与聚合。
+测试覆盖初始化、completed project reopen/history、schema 与路径安全、Worker 复用、依赖与写域冲突、陈旧 Review 防护、Owner 原话保存、零聊天 Lead 接班、Owner 汇报生命周期、最简充分可靠原则、显式激活与模型路由契约、全部行为契约，以及 benchmark 归因与聚合。
 
 ## 兼容性与当前限制
 
 - 不同对话必须共享一个可写仓库。
 - v1 由 Owner 手动打开指定模型的顶层对话。
 - 仓库状态可以在宿主对话丢失后恢复同一个 formal Worker，但 TAO 无法复活宿主本身已经丢失的 conversation object。
-- 初始化采用原子发布；Worker 注册、reopen、Worker reassignment 和 Review assignment 都支持 crash recovery。旧版本已经留下的 partial runtime 仍会 fail closed，需要人工检查后处理。
+- 旧 schema-v1 runtime 即使没有 `OWNER_STATUS.md` 仍然有效；Lead 在下一次 meaningful transition 创建它，不需要迁移框架或状态 hash。
+- 既有内部 crash-recovery 行为继续兼容，但正常 Agent 不检查也不扩展它，除非具体 validation error 指向相关文件。
 - 不同宿主的模型和 reasoning 名称可能不同，必要时使用通用 Profile。Owner 创建的对话绝不根据 reasoning 标签门控 continuation。
 - Native effective metadata 只证明 native 路由，不证明计费；手动路由由 Owner 控制。Token 与 credits 归因必须来自宿主按模型/按对话遥测或有记录的人工测量，否则记为 unknown。
 - SkillsMP 独立按自己的周期扫描公开 GitHub 仓库；发布仓库不能保证立刻完成索引。

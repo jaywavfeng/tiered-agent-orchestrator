@@ -16,7 +16,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         frontmatter = match.group(1)
         self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.4.2"', frontmatter)
+        self.assertIn('version: "0.5.0"', frontmatter)
         description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
         self.assertLessEqual(len(description), 1024)
         self.assertIn("large", description)
@@ -66,11 +66,11 @@ class SkillContractTests(unittest.TestCase):
             with self.subTest(path=path):
                 json.loads(path.read_text(encoding="utf-8"))
 
-    def test_eval_suite_covers_a_through_p(self) -> None:
+    def test_eval_suite_covers_a_through_s(self) -> None:
         value = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
         self.assertEqual(value["skill_name"], "tao")
         ids = [item["id"] for item in value["evals"]]
-        self.assertEqual(ids, list("ABCDEFGHIJKLMNOP"))
+        self.assertEqual(ids, list("ABCDEFGHIJKLMNOPQRS"))
         for item in value["evals"]:
             self.assertTrue(item["prompt"].strip())
             self.assertTrue(item["expected_output"].strip())
@@ -85,6 +85,7 @@ class SkillContractTests(unittest.TestCase):
             "$tao status",
             "python scripts/statectl.py",
             "reassign-worker",
+            "OWNER_STATUS.md",
             "Benchmark pending",
             "Apache-2.0",
         ]
@@ -95,6 +96,78 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("你不需要复制任何上一段聊天内容。", chinese)
         self.assertIn("README.zh-CN.md", english)
         self.assertIn("README.md", chinese)
+
+    def test_zero_context_lead_takeover_contract(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        runtime = (ROOT / "references" / "runtime-state.md").read_text(
+            encoding="utf-8"
+        )
+        required = [
+            "final goal",
+            "completed work",
+            "current position",
+            "verified results",
+            "blockers",
+            "next action",
+            "Owner decision",
+        ]
+        for text in (skill, protocol, runtime):
+            with self.subTest(document=text[:30]):
+                self.assertIn("$tao continue lead", text)
+                self.assertIn("HANDOFF.md", text)
+                self.assertIn("chat history", text)
+                for phrase in required:
+                    self.assertIn(phrase, text)
+
+    def test_owner_status_is_separate_human_summary(self) -> None:
+        template = (ROOT / "assets" / "runtime" / "OWNER_STATUS.md").read_text(
+            encoding="utf-8"
+        )
+        runtime = (ROOT / "references" / "runtime-state.md").read_text(
+            encoding="utf-8"
+        )
+        for heading in (
+            "## What this project is doing",
+            "## Completed",
+            "## Current position",
+            "## Results",
+            "## Risks or failures",
+            "## In progress",
+            "## Next",
+            "## Owner decision",
+        ):
+            self.assertIn(heading, template)
+        self.assertIn("plain-language management report", runtime)
+        self.assertIn("never used to override", (ROOT / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_simplest_sufficient_reliability_limits_defensive_overhead(self) -> None:
+        principle = (
+            "Prefer the simplest mechanism that is sufficiently reliable for the actual "
+            "failure modes of the project."
+        )
+        paths = [
+            ROOT / "SKILL.md",
+            ROOT / "references" / "orchestration-protocol.md",
+            ROOT / "references" / "runtime-state.md",
+            ROOT / "README.md",
+            ROOT / "README.zh-CN.md",
+        ]
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path):
+                self.assertIn(principle, text)
+                self.assertTrue(
+                    "concrete" in text.lower() or "具体" in text,
+                    f"{path} must require an observed or concrete failure mode",
+                )
+                self.assertIn("token", text.lower())
+        skill = paths[0].read_text(encoding="utf-8").lower()
+        for term in ("hash", "checksum", "transaction marker", "audit"):
+            self.assertIn(term, skill)
+        self.assertIn("once the mechanism is sufficiently reliable", skill)
 
     def test_worker_identity_is_reusable_across_assignments(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

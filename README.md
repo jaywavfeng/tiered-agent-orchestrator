@@ -2,11 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Use the cheapest model that is likely to complete the task correctly without costly rework. Keep project state across agent conversations.**
+**Correct completion first, then maximize useful work per token/credit. Use the cheapest model likely to finish correctly without costly rework, and keep the project recoverable without chat history.**
 
 One project. One long-lived manager. Reusable long-lived workers. Shared repository state.
 
-> Project status: v0.4.2 · Apache-2.0 · Benchmark pending
+> Project status: v0.5.0 · Apache-2.0 · Benchmark pending
 
 ## Why this exists
 
@@ -22,7 +22,7 @@ OWNER
         └── REVIEWER (balanced or strong, only when justified)
 ```
 
-The Lead distills expensive reasoning into a compact plan and bounded assignments. Workers do most of the implementation. Operational state lives in `.tiered-agent/`, so a new conversation can continue without chat history.
+The Lead distills expensive reasoning into a compact plan and bounded assignments. Workers do most of the implementation. Operational state lives in `.tiered-agent/`, so a new account or completely fresh Lead can continue without chat history. `HANDOFF.md` is the Lead's cold-start packet; `OWNER_STATUS.md` is the separate human project-manager report.
 
 **You never need to copy the previous conversation.**
 
@@ -47,6 +47,9 @@ This routing is a hard constraint. Ordinary execution defaults directly to `gpt-
 - Requires an explicit high-risk justification before assigning a strong-tier review.
 - Escalates decisions and ambiguous intent instead of turning the Owner into a message bus.
 - Loads context progressively so Workers do not pay to read the Lead's entire exploration.
+- Supports `$tao continue lead` from zero chat context through one bounded repository-state read sequence.
+- Keeps a concise `OWNER_STATUS.md` for the Owner without mixing presentation into machine state.
+- Prefers the simplest mechanism sufficient for real failure modes and rejects speculative defensive layers.
 - Adds deterministic, dependency-free state validation and management summaries.
 - Provides paired benchmark tooling without publishing invented savings claims.
 
@@ -126,6 +129,18 @@ Only when a separate task is genuinely independent and parallel—or requires ma
 $tao continue worker-2
 ```
 
+### Zero-context Lead takeover
+
+Open the same repository in a new account or a completely fresh strong-model conversation and send:
+
+```text
+$tao continue lead
+```
+
+The new Lead does not need a recap. It reads `STATE.json` and `HANDOFF.md` first, then current `OWNER_DIRECTIVES.md`, only the relevant stable sections of `PLAN.md`, and active Worker/Reviewer status or blockers. That bounded set identifies the final goal, completed work, current position, role states, decisions and constraints, verified results, blockers, next action, and whether the Owner must decide anything. Code, diffs, and historical archives are loaded only when this evidence identifies a specific discrepancy.
+
+For the Owner's plain-language overview, open `.tiered-agent/OWNER_STATUS.md`. It is updated only at milestones, blockers, material result/risk changes, completion, reopen, or a changed Owner decision—not after each command.
+
 ### Dispatch lifecycle
 
 Ideal native-dispatch mode, available only when the returned receipt attests actual/effective model and reasoning:
@@ -168,8 +183,8 @@ For this Owner-created conversation, only a clearly visible model family is chec
 | `$tao <goal>` | Apply the complexity gate and initialize a Project Lead only for suitable work |
 | `$tao continue worker-1` | Continue a bounded Worker from repository state |
 | `$tao continue reviewer-1` | Continue an explicitly assigned review |
-| `$tao status` | Summarize Workers, review, blockers, risks, and next actor |
-| `$tao continue lead` | Resynchronize the original Lead with current repository state |
+| `$tao status` | Summarize machine/role state and point to the Owner report |
+| `$tao continue lead` | Cold-start or resynchronize any Lead from repository state alone |
 
 Simple, local, low-risk edits are completed directly without creating orchestration state.
 
@@ -181,6 +196,7 @@ Simple, local, low-risk edits are completed directly without creating orchestrat
 ├── PLAN.md
 ├── OWNER_DIRECTIVES.md
 ├── HANDOFF.md
+├── OWNER_STATUS.md
 ├── inbox/owner/<event-id>.md
 ├── history/completion-<revision>/
 │   └── complete global, Worker, and Review snapshot
@@ -199,13 +215,15 @@ Simple, local, low-risk edits are completed directly without creating orchestrat
     └── history/review-<revision>/
 ```
 
-`STATE.json` is deliberately small and never stores chat transcripts, hidden reasoning, secrets, command logs, or model names. `PLAN.md` stores decisions rather than chain-of-thought. `HANDOFF.md` stores only the next role's essential facts.
+`STATE.json` is deliberately small and never stores chat transcripts, hidden reasoning, secrets, command logs, or model names. `PLAN.md` is the stable source for the final goal, completion criteria, decisions, constraints, milestones, allocation, and validation strategy. `OWNER_DIRECTIVES.md` contains current authoritative Owner direction. Worker/Reviewer files contain scoped technical evidence. `HANDOFF.md` is the compact Lead cold-start packet. `OWNER_STATUS.md` is a derived, plain-language Owner report and never overrides canonical state.
+
+Record each fact once in its canonical file. Summaries compress and point to detail instead of copying it. Update them only at meaningful transitions.
 
 Global state, the plan, directives, assignments, and assignment archives have one writer: PROJECT_LEAD. Each Worker owns only its declared code scope, current status, blocker, and uniquely named Owner-feedback events. After completion, only the Lead's reassignment transaction may archive those files and reset the Worker to `ready`.
 
 ## State helper
 
-Python 3.9+ is the only runtime dependency. The helper uses the standard library. Initialization never overwrites existing state. Reopen snapshots completed projects; reassignment and review assignment preserve old evidence and recover interrupted multi-file transactions before replacing current state.
+Python 3.9+ is the only runtime dependency. The helper uses the standard library. Initialization never overwrites existing state; reopen snapshots completed projects; reassignment and review assignment preserve prior evidence. Existing recovery behavior remains an internal compatibility detail rather than something Agents should inspect during ordinary work.
 
 ```console
 python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
@@ -236,6 +254,14 @@ Completed state is frozen but reopenable. The Lead answers read-only follow-ups 
 
 Escalation is evidence-based, not “three failures means stop.” A Worker continues while each attempt tests a distinct hypothesis and stops when it is repeating the same failure class without new evidence.
 
+## Sufficient reliability, not defensive theater
+
+> **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
+
+TAO defaults to simple repository files, atomic replacement for machine-written state, basic schema/reference/ownership checks, and targeted rereading after a real error. It does not ask Agents to add hashes, checksum trees, freshness markers, nested gates, periodic audits, or recovery-of-recovery logic for theoretical edge cases. Extra protection is justified only by a concrete, materially harmful failure whose expected benefit clearly exceeds code complexity, maintenance, context, and token cost.
+
+The Lead does not proactively run repository-wide audits, security sweeps, or consistency scans. Without evidence of a problem, it spends the budget advancing the Owner's actual deliverable.
+
 ## Review policy
 
 Low-risk, well-validated work can finish without a separate review. Medium or large changes normally use a balanced Reviewer. A strong Reviewer is reserved for high-risk, core algorithm, architecture, security, or multi-Worker integration work.
@@ -261,14 +287,15 @@ python scripts/statectl.py --help
 python scripts/benchmark.py --help
 ```
 
-The test suite covers atomic initialization, crash-recoverable Worker registration/reassignment/Review assignment, completed-project reopen/history, schema and path safety, reusable Workers, dependency and literal/glob-scope conflicts, stale-review prevention, verbatim Owner feedback, explicit activation/model-routing contracts, all A–P behavior contracts, and benchmark attribution/aggregation.
+The test suite covers initialization, completed-project reopen/history, schema and path safety, reusable Workers, dependency and write-scope conflicts, stale-review prevention, verbatim Owner feedback, zero-chat Lead takeover, Owner-status lifecycle, simplest-sufficient reliability, explicit activation/model-routing contracts, all behavior contracts, and benchmark attribution/aggregation.
 
 ## Compatibility and current limitations
 
 - Requires conversations to share a writable repository.
 - The Owner manually opens model-specific top-level conversations in v1.
 - Repository state can resume a formal Worker after a lost host conversation, but TAO cannot resurrect the host conversation object itself.
-- Initialization is atomically published; Worker registration, reopen, Worker reassignment, and Review assignment are crash-recoverable. Old partial runtimes created by earlier releases remain fail-closed and require deliberate manual inspection.
+- Existing schema-v1 runtimes remain valid without `OWNER_STATUS.md`; the Lead creates it at the next meaningful transition. No migration framework or status hash is required.
+- Existing internal crash-recovery behavior remains supported, but normal Agents neither inspect it nor add more recovery layers unless a concrete validation error points there.
 - Model and reasoning labels vary across hosts; use the generic profile when needed. Owner-created conversations never gate continuation on reasoning labels.
 - Native effective metadata proves native routing, not billing. Manual routing is Owner-controlled. Token and credit attribution must come from host per-model/per-conversation telemetry or documented manual measurements; otherwise it remains unknown.
 - SkillsMP independently scans public GitHub repositories on its own schedule; repository publication cannot guarantee immediate indexing.

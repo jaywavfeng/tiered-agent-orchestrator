@@ -115,6 +115,32 @@ class StateCtlTests(unittest.TestCase):
         self.assertFalse((self.root / ".tiered-agent").exists())
         self.assertEqual(self.init(), self.root / ".tiered-agent")
 
+    def test_owner_status_is_created_human_owned_and_legacy_optional(self) -> None:
+        runtime = self.init()
+        owner_status = runtime / "OWNER_STATUS.md"
+        self.assertTrue(owner_status.is_file())
+        self.assertIn(
+            "# Owner Status: sample-project",
+            owner_status.read_text(encoding="utf-8"),
+        )
+        result, output, error = self.run_cli("status")
+        self.assertEqual(result, 0, error)
+        self.assertIn("Owner summary: .tiered-agent/OWNER_STATUS.md", output)
+
+        # Lead-written human presentation is deliberately not a second parsed state schema.
+        owner_status.write_text(
+            "# Owner Status\n\nA concise Owner-written presentation remains valid.\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(self.run_cli("validate")[0], 0)
+
+        # Schema-v1 runtimes created before v0.5.0 remain valid without migration.
+        owner_status.unlink()
+        self.assertEqual(self.run_cli("validate")[0], 0)
+        result, output, error = self.run_cli("status")
+        self.assertEqual(result, 0, error)
+        self.assertIn("Owner summary: not created yet", output)
+
     def test_worker_registration_status_and_summary(self) -> None:
         runtime = self.init()
         result, _, error = self.add_worker()
@@ -706,6 +732,7 @@ class StateCtlTests(unittest.TestCase):
             snapshot / "PLAN.md",
             snapshot / "OWNER_DIRECTIVES.md",
             snapshot / "HANDOFF.md",
+            snapshot / "OWNER_STATUS.md",
             snapshot / "workers" / "worker-1" / "TASK.md",
             snapshot / "workers" / "worker-1" / "STATUS.json",
             snapshot / "workers" / "worker-1" / "BLOCKER.md",

@@ -1,6 +1,6 @@
 interface:
   display_name: "Tiered Agent Orchestrator"
-  short_description: "Sol decisions, Luna/xhigh execution, durable handoffs"
-  default_prompt: "$tao Use gpt-5.6-sol/xhigh for Lead decisions, strict native effective-model/reasoning attestation for gpt-5.6-luna/xhigh and Terra routes, model-only reasoning-agnostic continuation for Owner-created Workers, frozen-but-reopenable completion, worker-1 reuse, and passive event waits."
+  short_description: "Zero-context handoffs with cost-aware execution"
+  default_prompt: "$tao Resume from repository state, keep OWNER_STATUS.md concise, prefer the simplest sufficient mechanism, reuse worker-1, and preserve a gpt-5.6-sol Lead, attested gpt-5.6-luna/xhigh Workers, Terra-first escalation, and passive waits."
 policy:
   allow_implicit_invocation: false

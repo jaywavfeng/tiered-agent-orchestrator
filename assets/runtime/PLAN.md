@@ -2,32 +2,24 @@
 
 ## Goal
 
-Describe the Owner's desired outcome.
+Describe the Owner's stable final outcome in one concise paragraph.
 
-## Current state
+## Completion criteria
 
-Record verified repository and environment facts.
+Define the observable conditions that mean the project is genuinely done.
 
-## Architecture decisions
+## Decisions and constraints
 
-Record decisions and consequences, not hidden reasoning.
-
-## Constraints
-
-List requirements that assignments must preserve.
+Record durable decisions, their consequences, and requirements that assignments must preserve. Do not record exploration or hidden reasoning.
 
 ## Milestones
 
 Define ordered, observable milestones.
 
-## Worker allocation
+## Work allocation
 
 Reference bounded Worker assignments.
 
-## Validation
+## Validation strategy
 
-List commands and observable checks.
-
-## Completion criteria
-
-Define when the project is genuinely complete.
+List the evidence and checks required at milestones and completion.

@@ -30,6 +30,14 @@ This example shows the user-facing flow, not a transcript that agents must copy.
 
    > `$tao status`
 
-9. After final completion, a read-only `$tao` question leaves the project complete. New actionable `$tao` feedback makes the Lead run `reopen-project`, archive the completion snapshot, and reassign the same `worker-1`; it never initializes a second project merely because the Owner requested a revision.
+   The concise human report is `.tiered-agent/OWNER_STATUS.md`; it changes only when the Owner-visible project picture changes.
 
-The Owner never copies the previous conversation. Without an explicit `$tao`, no orchestration state is read or changed—even if `.tiered-agent` already exists. After dispatch, the Lead may passively wait for an event but does not poll `STATUS.json` or duplicate the assignment; a timeout is not a milestone. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks or repeats an identical Luna failure path, it records the evidence, stops, and escalates to Terra first before considering Sol.
+9. If that Lead conversation or even the Codex account disappears, the Owner opens the repository in a new Lead conversation and sends:
+
+   > `$tao continue lead`
+
+   The Lead reads `STATE.json` and `HANDOFF.md` first, then only current directives, relevant stable plan sections, active role status, blockers, and pending Owner events. It never asks the Owner to reconstruct the chat.
+
+10. After final completion, a read-only `$tao` question leaves the project complete. New actionable `$tao` feedback makes the Lead run `reopen-project`, archive the completion snapshot, and reassign the same `worker-1`; it never initializes a second project merely because the Owner requested a revision.
+
+The Owner never copies the previous conversation. Without an explicit `$tao`, no orchestration state is read or changed—even if `.tiered-agent` already exists. After dispatch, the Lead may passively wait for an event but does not poll `STATUS.json` or duplicate the assignment; a timeout is not a milestone. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks or repeats an identical Luna failure path, it records the evidence, stops, and escalates to Terra first before considering Sol. TAO prefers the simplest mechanism sufficiently reliable for a real failure mode and does not spend the project budget inventing defensive layers.

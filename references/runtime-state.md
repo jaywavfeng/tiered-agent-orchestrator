@@ -12,12 +12,14 @@ Runtime state records assignments and evidence; it does not select models or rep
 ├── PLAN.md
 ├── OWNER_DIRECTIVES.md
 ├── HANDOFF.md
+├── OWNER_STATUS.md
 ├── inbox/owner/<event-id>.md
 ├── history/completion-<revision>/
 │   ├── STATE.json
 │   ├── PLAN.md
 │   ├── OWNER_DIRECTIVES.md
 │   ├── HANDOFF.md
+│   ├── OWNER_STATUS.md (when present)
 │   ├── REOPEN.json
 │   ├── workers/<worker-id>/{TASK.md,STATUS.json,BLOCKER.md}
 │   └── review/{TASK.md,STATUS.json,REPORT.md}
@@ -36,7 +38,7 @@ Runtime state records assignments and evidence; it does not select models or rep
     └── history/review-<revision>/{TASK.md,STATUS.json,REPORT.md}
 ```
 
-Use `scripts/statectl.py` for deterministic initialization, registration, reopening, reassignment, validation, status changes, Owner-event resolution, and management summaries. `init` builds a complete sibling staging directory and publishes it atomically without overwriting an initialized runtime. First Worker registration uses a durable marker recovered by the next command. `reopen-project` archives the complete project before changing global state. Reassignment archives the completed assignment before replacing current files.
+Use `scripts/statectl.py` for deterministic initialization, registration, reopening, reassignment, validation, status changes, Owner-event resolution, and management summaries. `init` publishes a complete runtime without overwriting an initialized one. `reopen-project` archives the complete project before changing global state. Reassignment preserves the completed assignment before replacing current files. Treat the helper's implementation details as internal: do not spend Agent context auditing them unless a concrete error points there.
 
 ## Ownership
 
@@ -46,6 +48,7 @@ PROJECT_LEAD exclusively owns:
 - `PLAN.md`
 - `OWNER_DIRECTIVES.md`
 - `HANDOFF.md`
+- `OWNER_STATUS.md`
 - Worker `TASK.md` files
 - Worker assignment-history archives
 - review assignment files
@@ -67,6 +70,8 @@ The only Lead write to current Worker-owned files is the `reassign-worker` trans
 
 Completed project state is frozen. Only `reopen-project` may return it to `planning/active`; routine status setters, Workers, Reviewers, and feedback-event writers cannot mutate it. Read-only Owner requests require no runtime write.
 
+`OWNER_STATUS.md` is Lead-owned presentation, not machine authority. Worker and Reviewer files never update it. Existing schema-v1 runtimes that predate the file remain valid; the Lead creates it at the next meaningful transition instead of running a migration framework.
+
 ## Global state
 
 Keep `STATE.json` small. It contains:
@@ -82,11 +87,27 @@ It must not contain chat transcripts, chain-of-thought, command logs, secrets, c
 
 Worker registry IDs and paths remain stable across assignments. The Lead updates only the reused Worker's active write scope and Worker dependencies during reassignment; a milestone change does not append a new registry entry.
 
-## Plan and handoff
+## Canonical responsibilities and cold-start takeover
 
-`PLAN.md` records goal, current state, architecture decisions, constraints, milestones, Worker allocation, validation, and completion criteria. Record decisions and their consequences, not hidden reasoning.
+Keep each fact in one canonical place:
 
-`HANDOFF.md` records only current progress, latest verification, recent material changes, next action, and decisions that cannot be forgotten. Do not copy terminal history or duplicate the plan.
+- `STATE.json` owns compact lifecycle and routing facts: phase, status, milestone, role paths, review requirement, timestamp, and next actor.
+- `PLAN.md` owns the stable final goal, completion criteria, durable architecture decisions and constraints, milestones, work allocation, and validation strategy.
+- `OWNER_DIRECTIVES.md` owns current authoritative Owner direction and unresolved choices. It is not a conversation transcript.
+- Worker and Reviewer status/blocker/report files own scoped execution results, evidence, failures, and next actions.
+- `HANDOFF.md` is the current Lead cold-start packet. It summarizes the final goal, completed work, current position, active roles, verified results, important decisions/constraints, blockers/risks, next action, and Owner decision requirement. It points to canonical detail rather than duplicating it.
+- `OWNER_STATUS.md` is a short, plain-language management report for the Owner: purpose, major completed outcomes, current phase, results, risks/failures, work in progress, next steps, and decisions needed. It contains no command log or low-level file list.
+
+For `$tao continue lead` with no chat history, read in this order:
+
+1. `STATE.json` and `HANDOFF.md`;
+2. `OWNER_DIRECTIVES.md` and the relevant stable sections of `PLAN.md`;
+3. current Worker/Reviewer status and any active blocker;
+4. pending Owner events.
+
+This set must answer the takeover questions without chat history. Read code, diffs, completion history, or old assignment archives only when the current packet identifies a discrepancy or missing decision.
+
+Update the canonical source first, then refresh `HANDOFF.md`. Refresh `OWNER_STATUS.md` only when a milestone, blocker, material result/risk, completion, reopen, next-step change, or Owner decision changes the human-visible picture. Neither summary is an append-only log.
 
 ## Worker status
 
@@ -115,7 +136,7 @@ The Worker always rereads current repository state when continued. Chat memory m
 
 `reopen-project` is PROJECT_LEAD-only and accepts an actionable Owner reason plus a new milestone. It copies global state, plan/directives/handoff, all current Worker task/status/blocker files, and the current review task/status/report into `history/completion-NNNN/`. Only after the snapshot directory is atomically published does it set the live project to `planning/active` and clear the old review requirement. The current completed Worker remains unchanged until the Lead uses `reassign-worker`, preserving both the stable Worker identity and assignment evidence.
 
-If a process stops after publishing the completion snapshot but before updating `STATE.json`, retrying `reopen-project` reuses the matching snapshot rather than creating a duplicate. A project is complete only when every non-inactive Worker is completed and any required review is completed and current.
+If a reopen is interrupted, rerun the same command or inspect the reported files. A project is complete only when every non-inactive Worker is completed and any required review is completed and current. Do not proactively design or audit additional recovery layers without evidence that this failure mode is occurring.
 
 ## Review history and invalidation
 
@@ -123,7 +144,7 @@ When execution resumes after a completed review, the global reviewer assignment 
 
 `assign-review --level strong` requires `--strong-justification`, which is preserved in `review/TASK.md`. This prevents a routine review from silently consuming the strong tier.
 
-Both `reassign-worker` and `assign-review` create a private durable marker before their multi-file update. At the start of the next command, `statectl.py` completes an interrupted compatible transaction. Recovery accepts only files matching the marker's old or new values and fails closed rather than overwriting newer content.
+Existing helper releases may contain internal recovery artifacts for interrupted multi-file updates. Agents should neither inspect nor extend them during normal work. A reported validation failure is the trigger for targeted inspection; theoretical crash timing is not.
 
 ## Dispatch handoff
 
@@ -151,3 +172,11 @@ Persist state on recoverable transitions, not after every command:
 - blocker or Owner decision becomes active;
 - review begins or ends;
 - work completes.
+
+## Sufficient reliability
+
+> **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
+
+The default is simple files, atomic replacement for individual machine-written state, basic schema/reference/ownership validation, and recovery by rereading the repository.
+
+Do not add checksum trees, content hashes, freshness markers, secondary transaction protocols, periodic audits, or recovery-of-recovery logic without a concrete, high-impact failure and evidence that the added protection is worth its code, tests, context, and token cost. Human summaries are deliberately not parsed or gated by `statectl`; their quality is a Project Lead responsibility at meaningful transitions.

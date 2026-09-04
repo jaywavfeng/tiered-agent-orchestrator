@@ -4,12 +4,16 @@ description: Orchestrate large, multi-stage, or long-running engineering work wi
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.4.2"
+  version: "0.5.0"
 ---
 
 # Tiered Agent Orchestrator
 
 > **Use the cheapest model that is likely to complete the task correctly without costly rework.**
+
+> **Correct completion first, then maximize useful work per token/credit.**
+
+> **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
 
 Use expensive intelligence only where expensive intelligence is needed. Optimize for completion-value efficiency: correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. A run is successful when strong-model usage falls without trading away correctness; spending more economy-model tokens is appropriate when it prevents rework.
 
@@ -17,6 +21,7 @@ Use expensive intelligence only where expensive intelligence is needed. Optimize
 - WORKER is a reusable, long-lived execution conversation that performs successive bounded assignments.
 - REVIEWER checks completed work when the expected quality gain justifies another model switch.
 - The repository carries operational state; chat history is never a handoff dependency.
+- `OWNER_STATUS.md` is a concise human report; it is not another machine-state database.
 
 The model tier is a hard constraint. PROJECT_LEAD uses the configured strong model only for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. WORKER uses the configured economy model with the profile's highest practical reasoning effort for nearly all execution; do not under-reason ordinary work merely to lower one run's cost. See the OpenAI profile for exact model and reasoning labels.
 
@@ -80,12 +85,26 @@ For a new project:
 
 Before every action, ask whether it needs strong reasoning. If not, delegate it to the current Worker. PROJECT_LEAD **MUST NOT** perform routine repository scans, SSH/GPU/disk/environment checks (including `nvidia-smi`), dependency installation, training, tests, implementation, debugging, video/data processing, chart generation, deployment, or repeated shell commands. Only the smallest read-only check required for an architecture decision is allowed.
 
-For resynchronization:
+For `$tao continue lead` resynchronization, including a new account or a Lead with no previous chat:
 
-1. Read `STATE.json`, active Worker status summaries, pending Owner inbox events, relevant blockers, and `HANDOFF.md`.
-2. Inspect diffs or code only where status and evidence require it.
-3. Interpret new Owner intent and update `OWNER_DIRECTIVES.md` and `PLAN.md` when decisions changed. For actionable feedback on a completed project, use the PROJECT_LEAD-only `reopen-project` first. When a completed Worker is suitable for the next assignment, use `reassign-worker` to archive its prior assignment, rewrite its task contract, and return it to `ready` instead of creating a new Worker ID.
-4. Report progress concisely. The Owner must not summarize Worker history. Do not poll for progress after dispatch; resume only on an event or Owner return.
+1. Read `STATE.json` for routing, phase, registered roles, review requirement, and next actor.
+2. Read `HANDOFF.md` as the current cold-start packet, then `OWNER_DIRECTIVES.md` and only the relevant stable sections of `PLAN.md`.
+3. Read active Worker/Reviewer status and blocker files plus pending Owner inbox events. Do not load completed assignment history unless the current evidence points to it.
+4. Confirm that the repository state answers: final goal, completed work, current position, active roles, durable decisions and constraints, verified results, blockers, next action, and whether the Owner must decide. If one item is missing, repair the appropriate canonical file before dispatch.
+5. Inspect diffs or code only where persisted evidence conflicts or a decision requires it.
+6. Interpret new Owner intent and update `OWNER_DIRECTIVES.md` and `PLAN.md` only when durable direction changed. For actionable feedback on a completed project, use the PROJECT_LEAD-only `reopen-project` first. When a completed Worker is suitable for the next assignment, use `reassign-worker` instead of creating a new Worker ID.
+7. Update `HANDOFF.md` and, when the human-visible picture changed, `OWNER_STATUS.md`. Report progress concisely. The Owner must not reconstruct or summarize chat history.
+
+### Repository-state responsibilities
+
+- `STATE.json`: compact machine routing and lifecycle facts only.
+- `PLAN.md`: stable final goal, completion criteria, durable decisions/constraints, milestones, allocation, and validation strategy.
+- `OWNER_DIRECTIVES.md`: current authoritative Owner decisions and unresolved Owner choices; no chat transcript.
+- Worker/Reviewer status and blocker files: scoped execution result, evidence, failure, and next action.
+- `HANDOFF.md`: compact, current Lead cold-start packet spanning the whole project, including important decisions and constraints; point to canonical detail instead of copying it.
+- `OWNER_STATUS.md`: plain-language project-manager report for the Owner; derived from canonical state and never used to override it.
+
+Update canonical state and both summaries only at a meaningful transition: assignment, milestone, blocker, material validation change, review decision, completion, or reopen. Do not update them after every command. Record a fact once in its canonical file; summaries should compress and link, not duplicate technical detail.
 
 ## Worker workflow
 
@@ -105,7 +124,7 @@ Then work independently through implementation and validation. Update only the W
 
 When the assignment is done, set the status to `completed` and return control to the Lead. Do not create or request a new Worker for the next milestone. The Lead may archive this assignment and reset the same Worker to `ready`; the Owner then continues the original Worker conversation with `$tao continue worker-N`.
 
-If a native runtime exits or the process crashes, repository status remains authoritative. Resume or rebind the same formal Worker and current assignment from `ready`, `active`, `blocked`, or `waiting-owner`; do not add a Worker or let PROJECT_LEAD duplicate its execution. `statectl.py` atomically publishes initialization and automatically resumes interrupted Worker registration, reassignment, and review-assignment transactions while refusing to overwrite newer conflicting files.
+If a native runtime exits or the process crashes, repository status remains authoritative. Reread the small state set, then resume or rebind the same formal Worker and current assignment from `ready`, `active`, `blocked`, or `waiting-owner`; do not add a Worker or let PROJECT_LEAD duplicate its execution. Use `statectl.py` for ordinary updates. Investigate recovery internals only when an actual validation error or contradictory file provides evidence of a problem.
 
 Apply clear local Owner corrections directly when scope and intent are unambiguous. For ambiguous, directional, or architecture-changing feedback, preserve the Owner's exact words with `statectl.py record-owner-feedback`, pause conflicting work, and direct the Owner back to the original Project Lead conversation.
 
@@ -129,7 +148,7 @@ Run `python scripts/statectl.py status --project-root <repo>` or read the same m
 - current risk and next actor;
 - whether an Owner decision is required.
 
-Do not scan the whole repository for a routine status request unless the persisted evidence conflicts.
+For a human overview, open `OWNER_STATUS.md`; refresh it only when the Owner-visible picture changed. Do not scan the whole repository, run a comprehensive audit, or perform a consistency sweep for a routine status request unless persisted evidence conflicts.
 
 ## Profiles
 
@@ -139,6 +158,12 @@ The protocol uses only `strong`, `balanced`, and `economy`. Read exactly one pro
 - [Generic profile](profiles/generic.md)
 
 Profiles are recommendations, not authorization to switch models or create conversations automatically. If the current model differs from a recommendation, give one short correction and preserve state.
+
+## Simplicity boundary
+
+Spend orchestration effort only on failure modes that are concrete, realistic, and materially harmful. Prefer simple state, atomic file replacement where already useful, basic schema/reference/ownership checks, and recovery by rereading the repository.
+
+Do not add hashes, checksums, transaction markers, nested gates, audit layers, staleness protocols, or recovery systems merely because a theoretical edge case exists. Add protection only when observed evidence or the project's actual risk makes its benefit clearly exceed implementation complexity, context load, maintenance, and token cost. Do not proactively audit the orchestration system itself while the project has useful work ready. Once the mechanism is sufficiently reliable, stop engineering it and advance the Owner's task.
 
 ## Safety
 

@@ -164,6 +164,38 @@
         "The Owner is not asked to resend $tao continue worker-3 or open a replacement conversation.",
         "Native actual/effective model and reasoning attestation remains unchanged for automatic dispatch."
       ]
+    },
+    {
+      "id": "Q",
+      "prompt": "$tao continue lead. This is a new Codex account and the conversation has no prior messages; continue the existing project from the repository only.",
+      "expected_output": "The new Project Lead reconstructs the final goal, completed work, current position, role states, decisions, evidence, blockers, next action, and Owner-decision need from the bounded repository state set without asking for a chat recap.",
+      "assertions": [
+        "STATE.json and HANDOFF.md are read first.",
+        "Only relevant PLAN.md sections, current directives, active role status, blockers, and pending Owner events are then loaded.",
+        "The Owner is not asked to copy or summarize previous conversation history.",
+        "Code, diffs, and archives are read only for a specific discrepancy."
+      ]
+    },
+    {
+      "id": "R",
+      "prompt": "$tao status. I am the Owner and want a quick project-manager overview, not a technical command log.",
+      "expected_output": "The Lead points the Owner to OWNER_STATUS.md and keeps it as a concise human summary of purpose, major completed outcomes, current phase/results, risks, in-progress work, next steps, and decisions needed.",
+      "assertions": [
+        "OWNER_STATUS.md is distinct from machine state and HANDOFF.md.",
+        "The report avoids terminal history and low-level file lists.",
+        "It is refreshed only when the Owner-visible picture changes."
+      ]
+    },
+    {
+      "id": "S",
+      "prompt": "$tao Before implementing this ordinary local feature, add checksums for every state file, three transaction gates, recovery markers, a periodic audit, and tests for hypothetical simultaneous power loss.",
+      "expected_output": "The Lead rejects speculative defensive machinery unless a concrete, materially harmful failure justifies it, keeps basic validation and atomic writes, and advances the actual feature.",
+      "assertions": [
+        "The simplest sufficiently reliable mechanism is preferred.",
+        "No hash, checksum, marker, audit, or recovery-of-recovery layer is added without real evidence.",
+        "The decision considers code, context, maintenance, and token cost.",
+        "Useful project work remains the priority."
+      ]
     }
   ]
 }
