@@ -103,7 +103,7 @@ class StateCtlTests(unittest.TestCase):
         original_rename = Path.rename
 
         def crash_before_publish(path: Path, target: Path) -> Path:
-            if Path(target) == self.root / ".tiered-agent":
+            if Path(target).resolve() == (self.root / ".tiered-agent").resolve():
                 raise RuntimeError("crash before publish")
             return original_rename(path, target)
 

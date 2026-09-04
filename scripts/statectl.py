@@ -1336,6 +1336,7 @@ def completion_history_revisions(runtime: Path) -> list[int]:
 
 
 def archive_project_completion(runtime: Path, reason: str) -> int:
+    runtime = runtime.resolve()
     state = load_state(runtime)
     current_state_text = state_path(runtime).read_text(encoding="utf-8")
     history_dir = runtime / "history"
