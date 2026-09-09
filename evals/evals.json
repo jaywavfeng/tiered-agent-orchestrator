@@ -17,7 +17,7 @@
     {
       "id": "B",
       "prompt": "$tao continue worker-1. The assigned integration now fails because the plan assumes an API capability that the dependency does not provide, and two evidence-based alternatives both change the architecture.",
-      "expected_output": "The Worker stops architecture guessing, records a concise blocker with evidence, updates only its own status, and directs the Owner to the original Project Lead conversation.",
+      "expected_output": "The Worker records scoped blocker evidence, updates only its status, and sends one callback to an authorized bound Lead; without tools/binding it gives the manual Lead continuation.",
       "assertions": [
         "The Worker does not make a new architecture decision.",
         "The blocker contains reproduction, attempts, evidence, and the exact decision required.",
@@ -62,7 +62,7 @@
       "assertions": [
         "The Owner message is stored verbatim rather than paraphrased as a decision.",
         "The Worker does not invent a new design.",
-        "The Owner is directed to the original Lead conversation."
+        "Notify the authorized bound Lead once, or use a manual Lead continuation when no binding/tool exists."
       ]
     },
     {
@@ -195,6 +195,76 @@
         "No hash, checksum, marker, audit, or recovery-of-recovery layer is added without real evidence.",
         "The decision considers code, context, maintenance, and token cost.",
         "Useful project work remains the priority."
+      ]
+    },
+    {
+      "id": "T",
+      "prompt": "$tao continue lead. Worker-1 is ready, both Owner-selected tasks are bound in this directory, and the Owner authorized assignments and callbacks. Deliver the assignment.",
+      "expected_output": "Read one host observation, validate the revision/directory/dependencies, reserve pending, send the generated packet without model overrides, record the actual delivery result and passively wait once.",
+      "assertions": [
+        "Only the bound task receives one assignment.",
+        "No model/thinking override is sent to the Owner-created Worker.",
+        "An unchanged timeout causes no further state writes or polling."
+      ]
+    },
+    {
+      "id": "U",
+      "prompt": "$tao continue lead. This host accepts model and thinking fields but returns only requested overrides. The Owner authorizes creating a new economy Worker.",
+      "expected_output": "Do not create a substantive Worker; missing actual model and reasoning proof requires the manual setup fallback even with creation authority.",
+      "assertions": [
+        "No substantive native dispatch occurs.",
+        "No accepted request or echoed setting is represented as effective metadata.",
+        "Existing manual Worker trust is not tightened."
+      ]
+    },
+    {
+      "id": "V",
+      "prompt": "$tao continue lead. A prior delivery is pending/unknown and the bounded target-history page does not show its message.",
+      "expected_output": "Make at most one targeted reconciliation; absence from a partial page is not proof of non-delivery. Keep delivery uncertain and do not resend or create another Worker.",
+      "assertions": [
+        "No duplicate dispatch.",
+        "No polling loop.",
+        "No fabricated not-sent receipt."
+      ]
+    },
+    {
+      "id": "W",
+      "prompt": "$tao continue worker-1. Update the current task status. The installed helper is in a path containing spaces and Chinese characters.",
+      "expected_output": "Resolve the verified Python executable and installed script, invoke the status subcommand in the terminal with quoted paths and current revision, and inspect exit code/output. Do not open an editor.",
+      "assertions": [
+        "No code, Invoke-Item, file-opening tool or bare .py execution.",
+        "No unnecessary full-source reading.",
+        "A file-open success cannot count as a state update."
+      ]
+    },
+    {
+      "id": "X",
+      "prompt": "$tao continue worker-1. You are unsure which arguments set-worker-status accepts.",
+      "expected_output": "Use the explicit Python interpreter and installed script to run set-worker-status --help, then the needed operation. Do not display the source in VS Code.",
+      "assertions": [
+        "Help uses the terminal CLI.",
+        "No editor or OS association change.",
+        "No broad source read before checking subcommand help."
+      ]
+    },
+    {
+      "id": "Y",
+      "prompt": "$tao status. A pending reassignment marker exists and read-only status reports an interrupted update.",
+      "expected_output": "Report the concrete interrupted update without mutation. Use recover through Python only when repair is authorized; preserve conflicting newer content. Do not open source in an editor.",
+      "assertions": [
+        "Status does not silently repair.",
+        "Targeted recovery does not overwrite newer task content.",
+        "No automatic editor launch."
+      ]
+    },
+    {
+      "id": "Z",
+      "prompt": "$tao Evaluate overhead. One completed run has measured purpose totals of 10 coordination and 100 actual-task tokens. Another run has only per-model totals; a third record is synthetic.",
+      "expected_output": "The attributable complete first run meets the 10% target. The second is unmeasured; the synthetic run is not actual savings evidence. Do not request a daily Worker ledger.",
+      "assertions": [
+        "Use coordination/task, not coordination/total.",
+        "Lead architecture and acceptance are task work, not automatically coordination.",
+        "Missing classification and synthetic usage cannot support a numeric success claim."
       ]
     }
   ]

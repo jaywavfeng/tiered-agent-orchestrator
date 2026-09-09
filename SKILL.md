@@ -1,170 +1,72 @@
 ---
 name: tao
-description: Orchestrate large, multi-stage, or long-running engineering work with a persistent strong Project Lead, reusable economy Workers, optional review, and repository-backed handoffs. Activate only for an explicit $tao command; existing state or work on TAO itself never activates it implicitly. Do not start the full workflow for simple, local, low-risk edits that one agent can finish directly.
+description: Orchestrate large, multi-stage engineering work with a decision-focused Lead, reusable economy Workers, repository-backed handoffs, and optional host task messaging. Activate only for an explicit $tao command. Do not orchestrate simple local edits or activate merely because this skill is being maintained.
 license: Apache-2.0
 metadata:
   author: "jaywavfeng"
-  version: "0.5.0"
+  version: "0.6.0"
 ---
 
 # Tiered Agent Orchestrator
 
 > **Use the cheapest model that is likely to complete the task correctly without costly rework.**
 
-> **Correct completion first, then maximize useful work per token/credit.**
+Correct completion first, then maximize useful work per token/credit. PROJECT_LEAD uses the strong tier for intent, architecture, difficult decisions and acceptance. A reusable WORKER uses the economy tier for implementation and validation. REVIEWER is optional and normally balanced. The repository carries operational state; chat history is never a handoff dependency.
+
+## Activate and choose a role
+
+The current Owner request must explicitly invoke `$tao`. Existing `.tiered-agent` state, pasted examples, or a request to develop/test/release TAO itself never activates orchestration. Without activation, work normally.
+
+For new work, handle a bounded, low-risk task directly when a durable handoff would cost more than it helps. Otherwise initialize once. With existing state, continue the named `worker-N` or `reviewer-N`; `$tao continue lead`, high-level feedback, or status returns to the Lead. Do not rerun the complexity gate for an existing assignment.
+
+Completed projects remain frozen for read-only questions. For actionable changes, only the Lead uses the `reopen-project` subcommand, which archives completion before resuming planning. Then reuse a completed Worker via `reassign-worker`.
+
+## Run the helper, do not open it
+
+`scripts/statectl.py` is a command-line tool. Invoke it through a verified Python 3.9+ interpreter in the terminal. Resolve this skill's script location once; from an installed skill use its absolute path, not a same-named file in the target project.
+
+```powershell
+& "<absolute path to python.exe>" "<absolute skill directory>\scripts\statectl.py" context --project-root "<project directory>" --role worker-1
+```
+
+On other shells use `python "/absolute/skill/scripts/statectl.py" ...`. Replace placeholders with real paths. Never launch a bare `.py` path, `code`, `Invoke-Item`, `Start-Process` on the script, or a file-opening tool to perform a state operation. Do not automatically show this helper in VS Code or the app's file panel. Opening is appropriate only when the Owner requests viewing/editing it. Do not change OS associations.
+
+Use the needed subcommand directly; if its arguments are unclear, run that subcommand with `--help`. Read source only to investigate a concrete error. Success requires the process exit code, CLI output and expected state, not an editor window. `context` also returns the executable/script argument array for subsequent calls.
+
+## Lead
+
+Read [Lead coordination](references/orchestration-protocol.md) for first planning or a directional change. Read [state ownership](references/runtime-state.md) once before modifying runtime state. Read exactly one [OpenAI](profiles/openai-codex.md) or [generic](profiles/generic.md) profile when selecting models.
+
+For a fresh project, use `init`, write stable goals/constraints/acceptance in `PLAN.md`, and register one Worker with `add-worker`. Group related execution steps into one bounded assignment. Add Workers only for useful independent work whose benefit exceeds coordination cost; never because the milestone changed.
+
+For `$tao continue lead`, use `context --role lead`. Its current status and `HANDOFF.md`, relevant `OWNER_DIRECTIVES.md`/`PLAN.md` sections, active blockers and pending events must recover the final goal, completed work, current position, verified results, constraints, blockers, next action and Owner decision without chat history. Read historical assignments or code only for a concrete discrepancy or decision.
+
+Before messaging or creating a runtime, read [host dispatch](references/host-dispatch.md). Reuse a bound Worker, persist the assignment first, prepare the short message, reserve delivery, send through the host, and record the outcome. Missing tools or a missing binding retains the manual `$tao continue worker-N` path. Automatic creation requires explicit Owner authority and actual/effective route evidence; capability to accept a model parameter is insufficient.
+
+The Lead MUST NOT substitute for a Worker on routine implementation, SSH/environment checks, `nvidia-smi`, training, tests or data processing. Use strong reasoning for decisions; a minimal read needed to decide architecture is appropriate. Task authorization also permits the small state/relay operations needed to manage that task.
+
+## Worker and Reviewer
+
+A Worker is a long-lived role and conversation, not a single task. Start with `context --role worker-N`; for a relay message also pass its `--assignment-revision`. Read the returned current task and status, relevant directives and named dependencies. Do not preload Lead references, the whole plan or archives.
+
+Confirm status, dependencies, `allowed_scope` and exclusions before acting. Execute and validate independently, using `set-worker-status` at meaningful transitions; relay-driven writes include `--assignment-revision`. Workers own their code scope, status, blocker and uniquely named Owner events, never the Lead's global files or transport bindings. Scope is not authority for unrelated external actions.
+
+Owner-created Workers check only a clearly exposed model family; if unavailable, continue without asking for selector proof. Never validate or gate reasoning in a manual conversation. A visible wrong model gets one correction for the same conversation. Native runtime proof is the Lead's responsibility, never recursive Worker self-inspection.
+
+On completion, set `completed`. With an authorized binding, use `notification-context` and send its message once to the Lead; otherwise return the manual continuation instruction. Do not request a new Worker for the next milestone. For a blocker, ambiguous Owner feedback or the same failure without new evidence, read [escalation](references/escalation-and-review.md). Clear in-scope corrections remain local; directional feedback is preserved verbatim for the Lead.
+
+A Reviewer starts only when assigned. Use `context --role reviewer-N`, inspect the task, relevant diff and actual validation evidence, then write the report and review status. Do not broaden implementation. Strong review needs an explicit risk justification; route rules are shared with Workers.
+
+## Keep coordination below the task
+
+Target **coordination tokens / actual-task tokens <= 10%** over a completed task. Architecture, implementation and substantive acceptance are actual work regardless of model tier. Protocol loading, bookkeeping, dispatch and redundant status checks are coordination. Attribute only from documented purpose-level evidence; incomplete attribution is unmeasured. No daily token ledger. Read [benchmark measurement](benchmarks/README.md) only when evaluating usage.
+
+Use one Worker by default, short messages and event-driven progress. A timeout is not a milestone: one unchanged passive wait ends without another polling/reanalysis loop. Completion/blocker messages can wake an idle bound Lead; no periodic automation is required. Status requests read current state only.
+
+Write at assignment, completion, blocker, material validation or direction changes, not after commands. Keep facts in their canonical file; refresh `HANDOFF.md` for a changed handoff and `OWNER_STATUS.md` only for changed human-visible outcomes/risks. The human summary is never used to override machine state. If measured overhead exceeds 10%, batch assignments and remove repeated context/reporting without weakening acceptance.
 
 > **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
 
-Use expensive intelligence only where expensive intelligence is needed. Optimize for completion-value efficiency: correct completion first, then lower strong-model/Sol usage, then lower credits/cost, then less unnecessary context and model switching, and only lastly fewer total tokens. A run is successful when strong-model usage falls without trading away correctness; spending more economy-model tokens is appropriate when it prevents rework.
+Do not add hashes, checksum trees, audit layers or new recovery protocols for hypothetical failures. Ordinary commands validate current state; explicit `validate` checks history. Read-only commands never repair files. Use `recover` through Python only after a reported interrupted update. Once the mechanism is sufficiently reliable, advance the Owner's task.
 
-- PROJECT_LEAD makes decisions and distills intent.
-- WORKER is a reusable, long-lived execution conversation that performs successive bounded assignments.
-- REVIEWER checks completed work when the expected quality gain justifies another model switch.
-- The repository carries operational state; chat history is never a handoff dependency.
-- `OWNER_STATUS.md` is a concise human report; it is not another machine-state database.
-
-The model tier is a hard constraint. PROJECT_LEAD uses the configured strong model only for ambiguity, architecture, major decisions, difficult blockers, and final acceptance. WORKER uses the configured economy model with the profile's highest practical reasoning effort for nearly all execution; do not under-reason ordinary work merely to lower one run's cost. See the OpenAI profile for exact model and reasoning labels.
-
-## Route the request
-
-Apply this activation gate before reading runtime state: the current Owner request must explicitly invoke `$tao`. The existence of `.tiered-agent`, a previous invocation, the repository name, or a request to develop/test/release TAO itself is never implicit activation. Without an explicit `$tao`, handle the request normally and do not enter any TAO role.
-
-After explicit activation, locate the repository root and check for `.tiered-agent/STATE.json`.
-
-1. If state exists, treat the request as a continuation. Do not run the new-project complexity gate. If it is `complete/complete`, first classify the current request using the completed-project gate below.
-2. If the user names `continue worker-N`, use the Worker workflow.
-3. If the user names `continue reviewer-N`, use the Reviewer workflow.
-4. If the user asks for status, mentions a blocker, says `continue lead`, naturally says `continue` in the original Lead conversation, or returns with high-level feedback, use the Project Lead resynchronization workflow.
-5. Otherwise apply the complexity gate.
-
-### Completed-project gate
-
-Completed state is frozen, not terminal forever.
-
-- For a question, status request, summary, explanation, retrospective, or other request that requires no repository change, answer from existing evidence and leave the project complete. Do not create an Owner event merely for a read-only request.
-- For an actionable correction, modification, added requirement, or optimization, PROJECT_LEAD runs `statectl.py reopen-project` with the Owner's reason and a new milestone. The command archives the complete project snapshot before returning it to `planning/active`. Then reuse a suitable completed Worker with `reassign-worker`; do not initialize a new project or add a Worker merely because the project reopened.
-- If intent is genuinely ambiguous, ask one concise question while leaving the project complete. Reopen only after actionable work is clear.
-
-## Complexity gate
-
-Handle the task directly without creating orchestration state when it is bounded, low-risk, locally clear, and likely to finish in one focused session without a durable handoff. Examples include a typo, a small configuration edit, or a straightforward isolated fix.
-
-Initialize the full workflow when at least one is true:
-
-- the task combines architecture, implementation, environment work, and validation;
-- it is long-running, multi-stage, cross-module, or likely to need checkpoints;
-- separating decisions from mechanical execution will materially reduce strong-model work;
-- the user explicitly requests tiered orchestration.
-
-If the gate rejects orchestration, state that briefly and complete the task normally. Do not create `.tiered-agent`.
-
-## Project Lead workflow
-
-Read [the orchestration protocol](references/orchestration-protocol.md) and [runtime state contract](references/runtime-state.md). Read [escalation and review](references/escalation-and-review.md) only when handling feedback, a blocker, or review.
-
-For a new project:
-
-1. Inspect only the repository entrypoints, instructions, and validation evidence needed for a decision. Do not broadly scan the repository.
-2. Resolve only uncertainties that materially change the goal or architecture.
-3. Initialize runtime state with `python scripts/statectl.py init --project-root <repo> --project-id <slug>`. If executing from an installed copy, use the absolute path to this skill's script.
-4. Write the distilled goal, current state, decisions, constraints, milestones, validation, and completion criteria to `PLAN.md`. Never record private chain-of-thought.
-5. Analyze the dependency graph. Default to one reusable Worker conversation for sequential milestones.
-6. Register the first Worker with `statectl.py add-worker`. Add another only when work is genuinely parallel, responsibilities or context differ materially, reuse would cause clear context pollution, or the existing Worker is inactive—and only when the benefit exceeds the extra conversation and token cost. Never add a Worker merely because the milestone changed.
-7. Before dispatch, apply the model-routing and host-capability rules below. Update global state only at meaningful transitions.
-
-### Hard model-routing and dispatch rules
-
-- Native automation is allowed only when the host both accepts explicit model/reasoning fields **and returns machine-readable actual/effective model and reasoning evidence for the created runtime**. PROJECT_LEAD **MUST** pass the configured economy model and `xhigh` reasoning, compare both returned values with the request, and bind the runtime to one formal `worker-N`. An accepted request, echoed input, success flag, runtime nickname, or undocumented assumption is not effective-route evidence.
-- Missing, rejected, ignored, or contradictory actual/effective metadata fails closed before substantive **native** Worker work. Determine this capability from the host contract before spawning when possible; if a purportedly attested spawn omits the evidence, stop that runtime. The Worker must not introspect or recursively self-prove its own route—the Lead verifies native evidence. Do not transfer this native attestation gate to an Owner-created top-level conversation.
-- If the host cannot provide native attestation, PROJECT_LEAD **MUST NOT** spawn a Worker and **MUST NOT** perform the assignment on Sol as a fallback. Stop the turn and tell the Owner to create or select a top-level economy Worker manually using the profile's model and `$tao continue worker-N`; the profile's reasoning level is a recommendation for creation, not a continuation gate.
-- An Owner-created top-level Worker or Reviewer has a deliberately lighter gate: check only the model family when the host clearly exposes it. Never inspect, validate, correct, or gate its reasoning level. If the model indicator is unavailable to the Agent, treat it as Owner-controlled and continue the existing `worker-N`/Reviewer without asking the Owner to inspect a selector, resend the command, create another conversation, or provide independent proof. If the visible model is clearly the wrong family, give one brief correction to switch the same conversation; preserve the assignment and never start a recursive verification loop.
-- Routing evidence and billing evidence are separate. Neither native effective-route attestation nor an Owner-controlled manual route proves token/credit attribution. TAO may report per-tier tokens, credits, or savings only from host per-model/per-conversation telemetry or a documented manual measurement; otherwise mark attribution unknown and make no savings claim.
-- Apply strict explicit-route attestation to native escalated Workers and Reviewers so they cannot silently inherit Sol. Their Owner-created top-level fallbacks use the lighter model-only, reasoning-agnostic rule.
-- A native subagent is only a Worker runtime; it remains bound by `TASK.md`, scope, status, dependencies, ownership, and the single-writer protocol. The host's multi-agent capability never justifies fan-out.
-- After dispatching a Worker, **MUST NOT** continuously poll `STATUS.json`, repeatedly timeout and re-analyze, duplicate the assignment, or perform the Worker's execution. A timeout is not a milestone. The Lead may use passive/event wait for automatic progress, then resume on a completion, blocker, milestone, or Owner event. For a manually opened Worker, end the Lead turn and wait for the Owner to return with `continue`.
-
-Before every action, ask whether it needs strong reasoning. If not, delegate it to the current Worker. PROJECT_LEAD **MUST NOT** perform routine repository scans, SSH/GPU/disk/environment checks (including `nvidia-smi`), dependency installation, training, tests, implementation, debugging, video/data processing, chart generation, deployment, or repeated shell commands. Only the smallest read-only check required for an architecture decision is allowed.
-
-For `$tao continue lead` resynchronization, including a new account or a Lead with no previous chat:
-
-1. Read `STATE.json` for routing, phase, registered roles, review requirement, and next actor.
-2. Read `HANDOFF.md` as the current cold-start packet, then `OWNER_DIRECTIVES.md` and only the relevant stable sections of `PLAN.md`.
-3. Read active Worker/Reviewer status and blocker files plus pending Owner inbox events. Do not load completed assignment history unless the current evidence points to it.
-4. Confirm that the repository state answers: final goal, completed work, current position, active roles, durable decisions and constraints, verified results, blockers, next action, and whether the Owner must decide. If one item is missing, repair the appropriate canonical file before dispatch.
-5. Inspect diffs or code only where persisted evidence conflicts or a decision requires it.
-6. Interpret new Owner intent and update `OWNER_DIRECTIVES.md` and `PLAN.md` only when durable direction changed. For actionable feedback on a completed project, use the PROJECT_LEAD-only `reopen-project` first. When a completed Worker is suitable for the next assignment, use `reassign-worker` instead of creating a new Worker ID.
-7. Update `HANDOFF.md` and, when the human-visible picture changed, `OWNER_STATUS.md`. Report progress concisely. The Owner must not reconstruct or summarize chat history.
-
-### Repository-state responsibilities
-
-- `STATE.json`: compact machine routing and lifecycle facts only.
-- `PLAN.md`: stable final goal, completion criteria, durable decisions/constraints, milestones, allocation, and validation strategy.
-- `OWNER_DIRECTIVES.md`: current authoritative Owner decisions and unresolved Owner choices; no chat transcript.
-- Worker/Reviewer status and blocker files: scoped execution result, evidence, failure, and next action.
-- `HANDOFF.md`: compact, current Lead cold-start packet spanning the whole project, including important decisions and constraints; point to canonical detail instead of copying it.
-- `OWNER_STATUS.md`: plain-language project-manager report for the Owner; derived from canonical state and never used to override it.
-
-Update canonical state and both summaries only at a meaningful transition: assignment, milestone, blocker, material validation change, review decision, completion, or reopen. Do not update them after every command. Record a fact once in its canonical file; summaries should compress and link, not duplicate technical detail.
-
-## Worker workflow
-
-Read only [the runtime state contract](references/runtime-state.md), the named Worker's `TASK.md` and `STATUS.json`, relevant Owner directives, explicitly referenced plan sections, and the code dependencies named in the task.
-
-A Worker ID identifies a long-lived role and conversation, not a single task. Always reread the current `TASK.md`; the Lead may have safely reassigned the same Worker after an earlier assignment completed. Repository state, not remembered chat, defines the current assignment.
-
-Before editing, verify:
-
-- the Worker ID exists and the task status is ready, active, blocked, or waiting-owner;
-- the requested changes fit `allowed_scope` and avoid `do_not_modify`;
-- dependency Workers are complete when required.
-
-For an Owner-created top-level Worker, do not apply native attestation. If a current-conversation model indicator is clearly visible, check only that its model family matches the assigned Worker tier. Never validate or gate reasoning: `Luna / high`, `Luna / 极高`, and Luna with any other reasoning setting all continue. If the Agent cannot see the model or selector, continue from repository state without mentioning the uncertainty or asking the Owner to check, resend `$tao continue worker-N`, or create another Worker. A clearly visible wrong model gets at most one concise correction for the same conversation; it never changes or duplicates the formal Worker.
-
-Then work independently through implementation and validation. Update only the Worker's status, its allowed code scope, its blocker file, and uniquely named Owner inbox events. Do not edit global state, the plan, other assignments, or other Worker status files.
-
-When the assignment is done, set the status to `completed` and return control to the Lead. Do not create or request a new Worker for the next milestone. The Lead may archive this assignment and reset the same Worker to `ready`; the Owner then continues the original Worker conversation with `$tao continue worker-N`.
-
-If a native runtime exits or the process crashes, repository status remains authoritative. Reread the small state set, then resume or rebind the same formal Worker and current assignment from `ready`, `active`, `blocked`, or `waiting-owner`; do not add a Worker or let PROJECT_LEAD duplicate its execution. Use `statectl.py` for ordinary updates. Investigate recovery internals only when an actual validation error or contradictory file provides evidence of a problem.
-
-Apply clear local Owner corrections directly when scope and intent are unambiguous. For ambiguous, directional, or architecture-changing feedback, preserve the Owner's exact words with `statectl.py record-owner-feedback`, pause conflicting work, and direct the Owner back to the original Project Lead conversation.
-
-When blocked, follow [escalation and review](references/escalation-and-review.md). Stop the same failure path when it repeats instead of retrying it with Luna without new evidence; escalate the capability gap to the first lower-cost escalation tier before considering the strong tier.
-
-## Reviewer workflow
-
-Proceed only when `STATE.json` requests review and `review/TASK.md` names the reviewer. Read the review task, relevant diff, completion criteria, and validation evidence. Do not broaden implementation scope. A strong-tier review requires an explicit high-risk justification; ordinary review stays below strong.
-
-Before a native Reviewer starts, apply the same strict route-attestation gate as a native Worker using the profile's configured review model and reasoning. If native effective metadata is unavailable, use an Owner-created top-level Reviewer conversation. That manual Reviewer checks only a clearly visible model family and never gates reasoning; an unavailable indicator does not block review. Never let a native Reviewer silently inherit the Project Lead model.
-
-Write findings and evidence to `review/REPORT.md` and update `review/STATUS.json`. Approve, request bounded fixes, or escalate a decision to PROJECT_LEAD. Never invent release approval when validation is incomplete.
-
-## Status workflow
-
-Run `python scripts/statectl.py status --project-root <repo>` or read the same minimal files manually. Report:
-
-- each Worker state and current result;
-- review state;
-- active blockers and pending Owner feedback;
-- current risk and next actor;
-- whether an Owner decision is required.
-
-For a human overview, open `OWNER_STATUS.md`; refresh it only when the Owner-visible picture changed. Do not scan the whole repository, run a comprehensive audit, or perform a consistency sweep for a routine status request unless persisted evidence conflicts.
-
-## Profiles
-
-The protocol uses only `strong`, `balanced`, and `economy`. Read exactly one profile when recommending a conversation model:
-
-- [OpenAI Codex profile](profiles/openai-codex.md)
-- [Generic profile](profiles/generic.md)
-
-Profiles are recommendations, not authorization to switch models or create conversations automatically. If the current model differs from a recommendation, give one short correction and preserve state.
-
-## Simplicity boundary
-
-Spend orchestration effort only on failure modes that are concrete, realistic, and materially harmful. Prefer simple state, atomic file replacement where already useful, basic schema/reference/ownership checks, and recovery by rereading the repository.
-
-Do not add hashes, checksums, transaction markers, nested gates, audit layers, staleness protocols, or recovery systems merely because a theoretical edge case exists. Add protection only when observed evidence or the project's actual risk makes its benefit clearly exceed implementation complexity, context load, maintenance, and token cost. Do not proactively audit the orchestration system itself while the project has useful work ready. Once the mechanism is sufficiently reliable, stop engineering it and advance the Owner's task.
-
-## Safety
-
-Never let orchestration bypass host approvals or user control. Do not automatically push Git, force-push, delete important data, expose secrets, change global agent configuration, or deploy production systems. A task assignment grants write scope, not new external authority.
+Never bypass host approvals. Git publication, production deployment, destructive changes and global configuration changes require existing Owner authority; an assignment alone does not grant it. Route evidence does not prove billing or savings.

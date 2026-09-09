@@ -41,6 +41,55 @@ def record(task_id: str, strategy: str, strong: int, economy: int) -> dict:
 
 
 class BenchmarkTests(unittest.TestCase):
+    def purpose_record(self, coordination=10, task=100, unclassified=0, synthetic=False):
+        value = record("purpose-fixture", "tiered", coordination, task + unclassified)
+        value["purpose_usage"] = {
+            "coordination": coordination, "task": task, "unclassified": unclassified,
+            "source": "documented-purpose-attribution", "evidence": "Unit test attribution fixture",
+            "synthetic": synthetic,
+        }
+        return value
+
+    def test_overhead_ten_percent_boundary_and_excess(self):
+        for coordination, expected in ((9, True), (10, True), (11, False)):
+            value = self.purpose_record(coordination)
+            self.assertEqual(benchmark.validate_record(value), [])
+            result = benchmark.overhead_result(value)
+            self.assertEqual(result["within_target"], expected)
+            self.assertEqual(result["ratio"], coordination / 100)
+
+    def test_overhead_is_unmeasured_for_missing_incomplete_or_zero_denominator(self):
+        values = [record("legacy", "tiered", 10, 100), self.purpose_record(task=0),
+                  self.purpose_record(unclassified=1)]
+        failed = self.purpose_record()
+        failed["success"] = False
+        for value in [*values, failed]:
+            self.assertEqual(benchmark.validate_record(value), [])
+            result = benchmark.overhead_result(value)
+            self.assertEqual(result["status"], "unmeasured")
+            self.assertIsNone(result["ratio"])
+            self.assertIsNone(result["within_target"])
+
+    def test_synthetic_purpose_data_never_establishes_measured_savings(self):
+        result = benchmark.overhead_result(self.purpose_record(synthetic=True))
+        self.assertEqual(result["status"], "synthetic")
+        self.assertIsNone(result["within_target"])
+        self.assertIsNone(result["ratio"])
+
+    def test_purpose_validation_rejects_unattributed_and_inconsistent_counts(self):
+        for field, invalid in (("coordination", -1), ("task", True), ("unclassified", 3),
+                               ("source", "host-per-model-telemetry"), ("evidence", ""), ("synthetic", "false")):
+            value = self.purpose_record()
+            value["purpose_usage"][field] = invalid
+            self.assertTrue(benchmark.validate_record(value), (field, invalid))
+
+    def test_aggregate_does_not_hide_an_over_budget_run_in_average(self):
+        baseline = self.purpose_record()
+        baseline["strategy"] = "strong-only"
+        excess = self.purpose_record(50)
+        result = benchmark.aggregate([baseline, self.purpose_record(0), excess])
+        self.assertEqual([r["within_target"] for r in result["overhead_by_run"]], [True, True, False])
+
     def test_record_validation_rejects_bad_total(self) -> None:
         value = record("task-a", "tiered", 100, 200)
         value["tokens"]["total"] = 1

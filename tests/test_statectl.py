@@ -192,7 +192,9 @@ class StateCtlTests(unittest.TestCase):
         marker = statectl.add_worker_marker_path(runtime, "worker-1")
         self.assertTrue(marker.is_file())
         self.assertFalse((runtime / "workers" / "worker-1").exists())
-        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertEqual(self.run_cli("status")[0], 2)
+        self.assertTrue(marker.exists())
+        self.assertEqual(self.run_cli("recover")[0], 0)
         self.assertFalse(marker.exists())
         self.assertTrue((runtime / "workers" / "worker-1" / "TASK.md").is_file())
         state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
@@ -965,7 +967,9 @@ class StateCtlTests(unittest.TestCase):
                 self.run_cli(*args)
         marker = runtime / "review" / statectl.REVIEW_ASSIGNMENT_MARKER
         self.assertTrue(marker.is_file())
-        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertEqual(self.run_cli("status")[0], 2)
+        self.assertTrue(marker.exists())
+        self.assertEqual(self.run_cli("recover")[0], 0)
         self.assertFalse(marker.exists())
         state = json.loads((runtime / "STATE.json").read_text(encoding="utf-8"))
         self.assertEqual(state["phase"], "review")
@@ -1142,7 +1146,9 @@ class StateCtlTests(unittest.TestCase):
             json.loads((worker_dir / "STATUS.json").read_text(encoding="utf-8"))["status"],
             "completed",
         )
-        self.assertEqual(self.run_cli("status")[0], 0)
+        self.assertEqual(self.run_cli("status")[0], 2)
+        self.assertTrue(marker.exists())
+        self.assertEqual(self.run_cli("recover")[0], 0)
         self.assertFalse(marker.exists())
         self.assertEqual(
             json.loads((worker_dir / "STATUS.json").read_text(encoding="utf-8"))["status"],
@@ -1170,7 +1176,7 @@ class StateCtlTests(unittest.TestCase):
                 self.reassign_worker()
         task = runtime / "workers" / "worker-1" / "TASK.md"
         task.write_text("# Newer external task\n", encoding="utf-8")
-        result, _, error = self.run_cli("status")
+        result, _, error = self.run_cli("recover")
         self.assertEqual(result, 2)
         self.assertIn("refusing to overwrite", error)
         self.assertEqual(task.read_text(encoding="utf-8"), "# Newer external task\n")

@@ -1,6 +1,6 @@
 interface:
   display_name: "Tiered Agent Orchestrator"
-  short_description: "Zero-context handoffs with cost-aware execution"
-  default_prompt: "$tao Resume from repository state, keep OWNER_STATUS.md concise, prefer the simplest sufficient mechanism, reuse worker-1, and preserve a gpt-5.6-sol Lead, attested gpt-5.6-luna/xhigh Workers, Terra-first escalation, and passive waits."
+  short_description: "Reusable workers with lean, repository-backed handoffs"
+  default_prompt: "$tao Resume from repository state, reuse Workers, use explicit Python CLI calls, keep coordination below 10% when measured, and follow strict route evidence with passive event waits."
 policy:
   allow_implicit_invocation: false

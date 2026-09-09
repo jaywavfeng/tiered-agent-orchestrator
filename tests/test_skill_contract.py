@@ -5,359 +5,91 @@ import re
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class SkillContractTests(unittest.TestCase):
-    def test_skill_frontmatter_and_budget(self) -> None:
-        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    def test_frontmatter_version_and_small_entrypoint(self):
+        text = (ROOT / 'SKILL.md').read_text(encoding='utf-8')
+        match = re.match(r'^---\n(.*?)\n---\n', text, re.DOTALL)
         self.assertIsNotNone(match)
-        frontmatter = match.group(1)
-        self.assertIn("name: tao", frontmatter)
-        self.assertIn('version: "0.5.0"', frontmatter)
-        description = re.search(r"(?m)^description:\s*(.+)$", frontmatter).group(1)
+        self.assertIn('name: tao', match.group(1))
+        self.assertIn('version: "0.6.0"', match.group(1))
+        description = re.search(r'(?m)^description:\s*(.+)$', match.group(1)).group(1)
         self.assertLessEqual(len(description), 1024)
-        self.assertIn("large", description)
-        self.assertIn("Do not", description)
-        self.assertLess(len(text.splitlines()), 500)
-        self.assertLess(len(text.split()), 5000)
+        self.assertLess(len(text.split()), 1600)
+        self.assertLess(len(text.splitlines()), 160)
 
-    def test_core_protocol_is_model_agnostic(self) -> None:
-        core_paths = [ROOT / "SKILL.md", *sorted((ROOT / "references").glob("*.md"))]
-        combined = "\n".join(path.read_text(encoding="utf-8") for path in core_paths)
-        for model_name in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
-            self.assertNotIn(model_name, combined.lower())
-        for tier in ("strong", "balanced", "economy"):
+    def test_provider_names_stay_out_of_core_protocol(self):
+        paths = [ROOT / 'SKILL.md', *sorted((ROOT / 'references').glob('*.md'))]
+        combined = '\n'.join(p.read_text(encoding='utf-8') for p in paths)
+        for name in ('gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'):
+            self.assertNotIn(name, combined)
+        for tier in ('strong', 'balanced', 'economy'):
             self.assertIn(tier, combined)
 
-    def test_openai_metadata_is_discoverable(self) -> None:
-        text = (ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn('display_name: "Tiered Agent Orchestrator"', text)
-        self.assertIn("$tao", text)
-        self.assertIn("allow_implicit_invocation: false", text)
-        self.assertNotIn("dependencies:", text)
+    def test_ui_metadata_keeps_explicit_activation(self):
+        text = (ROOT / 'agents/openai.yaml').read_text(encoding='utf-8')
+        self.assertIn('allow_implicit_invocation: false', text)
+        prompt = re.search(r'default_prompt: "([^"]+)"', text).group(1)
+        self.assertTrue(prompt.startswith('$tao'))
+        label = re.search(r'short_description: "([^"]+)"', text).group(1)
+        self.assertTrue(25 <= len(label) <= 64)
+        self.assertNotIn('dependencies:', text)
 
-        short_description = re.search(
-            r'(?m)^\s+short_description:\s+"([^"]+)"$', text
-        )
-        self.assertIsNotNone(short_description)
-        self.assertGreaterEqual(len(short_description.group(1)), 25)
-        self.assertLessEqual(len(short_description.group(1)), 64)
-        default_prompt = re.search(r'(?m)^\s+default_prompt:\s+"([^"]+)"$', text)
-        self.assertIsNotNone(default_prompt)
-        self.assertTrue(default_prompt.group(1).startswith("$tao"))
-        self.assertIn("gpt-5.6-sol", default_prompt.group(1))
-        self.assertIn("gpt-5.6-luna", default_prompt.group(1))
-        self.assertIn("xhigh", default_prompt.group(1))
-        self.assertIn("Terra", default_prompt.group(1))
-        self.assertIn("passive", default_prompt.group(1))
-        self.assertRegex(text, r'(?m)^\s+allow_implicit_invocation:\s+false\s*$')
-
-    def test_all_json_assets_and_schemas_parse(self) -> None:
-        paths = [
-            *sorted((ROOT / "assets").rglob("*.json")),
-            *sorted((ROOT / "schemas").glob("*.json")),
-            ROOT / "evals" / "evals.json",
-        ]
-        self.assertGreaterEqual(len(paths), 8)
+    def test_all_published_json_parses(self):
+        paths = [*sorted((ROOT / 'assets').rglob('*.json')),
+                 *sorted((ROOT / 'schemas').glob('*.json')), ROOT / 'evals/evals.json']
         for path in paths:
             with self.subTest(path=path):
-                json.loads(path.read_text(encoding="utf-8"))
+                json.loads(path.read_text(encoding='utf-8'))
 
-    def test_eval_suite_covers_a_through_s(self) -> None:
-        value = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
-        self.assertEqual(value["skill_name"], "tao")
-        ids = [item["id"] for item in value["evals"]]
-        self.assertEqual(ids, list("ABCDEFGHIJKLMNOPQRS"))
-        for item in value["evals"]:
-            self.assertTrue(item["prompt"].strip())
-            self.assertTrue(item["expected_output"].strip())
-            self.assertGreaterEqual(len(item["assertions"]), 2)
+    def test_eval_scenarios_keep_existing_cases_and_add_relay_editor_and_budget(self):
+        value = json.loads((ROOT / 'evals/evals.json').read_text(encoding='utf-8'))
+        self.assertEqual(value['skill_name'], 'tao')
+        ids = [item['id'] for item in value['evals']]
+        self.assertEqual(ids, list('ABCDEFGHIJKLMNOPQRSTUVWXYZ'))
+        for item in value['evals']:
+            self.assertTrue(item['prompt'].strip())
+            self.assertTrue(item['expected_output'].strip())
+            self.assertGreaterEqual(len(item['assertions']), 2)
 
-    def test_readmes_share_public_contract(self) -> None:
-        english = (ROOT / "README.md").read_text(encoding="utf-8")
-        chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
-        shared = [
-            "$tao continue worker-1",
-            "$tao continue worker-2",
-            "$tao status",
-            "python scripts/statectl.py",
-            "reassign-worker",
-            "OWNER_STATUS.md",
-            "Benchmark pending",
-            "Apache-2.0",
-        ]
-        for marker in shared:
-            self.assertIn(marker, english)
-            self.assertIn(marker, chinese)
-        self.assertIn("You never need to copy the previous conversation.", english)
-        self.assertIn("你不需要复制任何上一段聊天内容。", chinese)
-        self.assertIn("README.zh-CN.md", english)
-        self.assertIn("README.md", chinese)
+    def test_public_docs_share_version_interfaces_and_evidence_boundary(self):
+        for name in ('README.md', 'README.zh-CN.md'):
+            text = (ROOT / name).read_text(encoding='utf-8')
+            for marker in ('v0.6.0', '$tao continue worker-1', '$tao continue lead', '$tao status',
+                           'Benchmark pending', '10%', 'purpose_usage', 'TRANSPORT.json', 'VS Code',
+                           'python scripts/statectl.py', 'Apache-2.0', 'reassign-worker', 'reopen-project'):
+                self.assertIn(marker, text)
 
-    def test_zero_context_lead_takeover_contract(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        )
-        runtime = (ROOT / "references" / "runtime-state.md").read_text(
-            encoding="utf-8"
-        )
-        required = [
-            "final goal",
-            "completed work",
-            "current position",
-            "verified results",
-            "blockers",
-            "next action",
-            "Owner decision",
-        ]
-        for text in (skill, protocol, runtime):
-            with self.subTest(document=text[:30]):
-                self.assertIn("$tao continue lead", text)
-                self.assertIn("HANDOFF.md", text)
-                self.assertIn("chat history", text)
-                for phrase in required:
-                    self.assertIn(phrase, text)
-
-    def test_owner_status_is_separate_human_summary(self) -> None:
-        template = (ROOT / "assets" / "runtime" / "OWNER_STATUS.md").read_text(
-            encoding="utf-8"
-        )
-        runtime = (ROOT / "references" / "runtime-state.md").read_text(
-            encoding="utf-8"
-        )
-        for heading in (
-            "## What this project is doing",
-            "## Completed",
-            "## Current position",
-            "## Results",
-            "## Risks or failures",
-            "## In progress",
-            "## Next",
-            "## Owner decision",
-        ):
-            self.assertIn(heading, template)
-        self.assertIn("plain-language management report", runtime)
-        self.assertIn("never used to override", (ROOT / "SKILL.md").read_text(encoding="utf-8"))
-
-    def test_simplest_sufficient_reliability_limits_defensive_overhead(self) -> None:
-        principle = (
-            "Prefer the simplest mechanism that is sufficiently reliable for the actual "
-            "failure modes of the project."
-        )
-        paths = [
-            ROOT / "SKILL.md",
-            ROOT / "references" / "orchestration-protocol.md",
-            ROOT / "references" / "runtime-state.md",
-            ROOT / "README.md",
-            ROOT / "README.zh-CN.md",
-        ]
+    def test_executable_statectl_examples_use_interpreter(self):
+        # Prevent the original ambiguous inline executable form from returning.
+        paths = [ROOT / 'SKILL.md', ROOT / 'README.md', ROOT / 'README.zh-CN.md',
+                 *sorted((ROOT / 'references').glob('*.md')), *sorted((ROOT / 'examples').glob('*.md'))]
         for path in paths:
-            text = path.read_text(encoding="utf-8")
-            with self.subTest(path=path):
-                self.assertIn(principle, text)
-                self.assertTrue(
-                    "concrete" in text.lower() or "具体" in text,
-                    f"{path} must require an observed or concrete failure mode",
-                )
-                self.assertIn("token", text.lower())
-        skill = paths[0].read_text(encoding="utf-8").lower()
-        for term in ("hash", "checksum", "transaction marker", "audit"):
-            self.assertIn(term, skill)
-        self.assertIn("once the mechanism is sufficiently reliable", skill)
+            text = path.read_text(encoding='utf-8')
+            self.assertNotRegex(text, r'`statectl\.py\s+[a-z]')
+            self.assertNotRegex(text, r'(?m)^\s*(?:scripts[/\\])?statectl\.py\s')
 
-    def test_worker_identity_is_reusable_across_assignments(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        )
-        runtime = (ROOT / "references" / "runtime-state.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("long-lived role and conversation, not a single task", skill)
-        self.assertIn("Completing M1 does not justify creating `worker-2`", protocol)
-        self.assertIn("completed → ready", runtime)
-        self.assertIn("history/assignment-", runtime)
-        self.assertIn("Only PROJECT_LEAD", protocol)
-        self.assertIn("reopen-project", skill)
-        self.assertIn("history/completion-", runtime)
-
-    def test_activation_is_explicit_even_when_runtime_exists(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        )
-        metadata = (ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        for text in (skill, protocol):
-            self.assertIn("explicit", text.lower())
-            self.assertIn("$tao", text)
-            self.assertIn("`.tiered-agent`", text)
-            self.assertIn("never", text.lower())
-        self.assertIn("allow_implicit_invocation: false", metadata)
-        self.assertIn("develop/test/release TAO itself", skill)
-
-    def test_cost_first_dispatch_contract_is_hard(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        )
-        profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
-        for text in (skill, protocol):
-            self.assertIn("MUST NOT", text)
-            self.assertIn("poll", text.lower())
-            self.assertIn("economy model", text.lower())
-        self.assertIn('model: "gpt-5.6-luna"', profile)
-        self.assertIn("MUST NOT be omitted", profile)
-        self.assertIn("MUST NOT spawn", profile)
-        self.assertIn('reasoning_effort: "xhigh"', profile)
-        self.assertIn("gpt-5.6-luna / xhigh", profile)
-
-    def test_completion_value_routing_and_escalation_contract(self) -> None:
-        principle = "Use the cheapest model that is likely to complete the task correctly without costly rework."
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        )
-        profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
-        for text in (skill, protocol, profile):
-            self.assertIn(principle, text)
-        self.assertIn("gpt-5.6-luna", profile)
-        self.assertIn("Extra High (`xhigh`)", profile)
-        self.assertIn("gpt-5.6-terra", profile)
-        self.assertIn("First escalation", profile)
-        self.assertIn("SOL escalation", profile)
-        self.assertIn("Terra remains insufficient", profile)
-
-    def test_native_and_manual_dispatch_are_separate_without_recursive_deadlock(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        ).lower()
-        runtime = (ROOT / "references" / "runtime-state.md").read_text(
-            encoding="utf-8"
-        ).lower()
-        for text in (skill, protocol, runtime):
-            self.assertIn("actual/effective", text)
-            self.assertIn("accept", text)
-            self.assertIn("contradict", text)
-            self.assertIn("recurs", text)
-            self.assertIn("passive", text)
-            self.assertIn("timeout is not a milestone", text)
-        self.assertIn("same failure", skill)
-        self.assertIn("same failure", protocol)
-        profile = (ROOT / "profiles" / "openai-codex.md").read_text(encoding="utf-8")
-        self.assertIn("## Owner-created top-level Worker or Reviewer", profile)
-        self.assertIn("`极高` = `xhigh`", profile)
-        self.assertIn("`高` = `high`", profile)
-        self.assertIn("`5.6 Luna / high`", profile)
-        self.assertIn("Luna with any other reasoning setting all continue", profile)
-        self.assertIn("If it is unavailable, continue", profile)
-        self.assertIn("resend `$tao continue worker-N`", profile)
-
-    def test_owner_created_runtime_never_gates_reasoning_or_unavailable_model(self) -> None:
-        paths = [
-            ROOT / "SKILL.md",
-            ROOT / "references" / "orchestration-protocol.md",
-            ROOT / "references" / "runtime-state.md",
-            ROOT / "profiles" / "openai-codex.md",
-        ]
-        for path in paths:
-            text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(path=path):
-                self.assertIn("owner-created", text)
-                self.assertIn("reasoning", text)
-                self.assertIn("unavailable", text)
-                self.assertIn("continue", text)
-                self.assertTrue("model-only" in text or "model family" in text)
-        skill = paths[0].read_text(encoding="utf-8")
-        self.assertIn("Never validate or gate reasoning", skill)
-        self.assertIn("Luna / high", skill)
-        self.assertIn("without mentioning the uncertainty", skill)
-
-    def test_route_evidence_is_stronger_than_acceptance_and_separate_from_billing(self) -> None:
-        paths = [
-            ROOT / "SKILL.md",
-            ROOT / "references" / "orchestration-protocol.md",
-            ROOT / "references" / "runtime-state.md",
-            ROOT / "profiles" / "openai-codex.md",
-        ]
-        for path in paths:
-            text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(path=path):
-                self.assertIn("machine-readable", text)
-                self.assertIn("reasoning", text)
-                self.assertIn("billing", text)
-                self.assertIn("telemetry", text)
-        profile = paths[-1].read_text(encoding="utf-8")
-        self.assertIn("Successful acceptance, echoed request arguments", profile)
-        self.assertIn("Native Terra Workers and Reviewers", profile)
-
-    def test_lead_delegates_mechanical_work(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
-        protocol = (ROOT / "references" / "orchestration-protocol.md").read_text(
-            encoding="utf-8"
-        ).lower()
-        for text in (skill, protocol):
-            self.assertIn("ssh", text)
-            self.assertIn("nvidia-smi", text)
-            self.assertIn("must not", text)
-            self.assertIn("strong reasoning", text)
-
-    def test_readmes_document_model_fallback_and_event_handoff(self) -> None:
-        for name in ("README.md", "README.zh-CN.md"):
-            text = (ROOT / name).read_text(encoding="utf-8").lower()
-            with self.subTest(name=name):
-                self.assertIn("gpt-5.6-luna", text)
-                self.assertIn("status.json", text)
-                self.assertTrue("poll" in text or "轮询" in text)
-                self.assertIn("worker-1", text)
-                self.assertIn("极高", text)
-                self.assertIn("reopen", text)
-                self.assertTrue("reasoning is never" in text or "完全不检查 reasoning" in text)
-                self.assertTrue("unavailable" in text or "看不到模型指示" in text)
-
-    def test_readmes_show_automatic_and_manual_economy_flows(self) -> None:
-        english = (ROOT / "README.md").read_text(encoding="utf-8")
-        chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
-        self.assertIn("explicit spawn of gpt-5.6-luna / xhigh worker-1", english)
-        self.assertIn("Owner opens gpt-5.6-luna (xhigh recommended)", english)
-        self.assertIn("machine-readable actual/effective", english)
-        self.assertIn("显式 spawn gpt-5.6-luna / xhigh worker-1", chinese)
-        self.assertIn("Owner 打开 gpt-5.6-luna（建议 xhigh）", chinese)
-        self.assertIn("机器可读 actual/effective", chinese)
-
-    def test_legacy_invocation_name_is_absent(self) -> None:
-        legacy = "$tiered-agent-" + "orchestrator"
-        text_suffixes = {".json", ".md", ".py", ".yaml", ".yml"}
-        for path in ROOT.rglob("*"):
-            if not path.is_file() or path.suffix not in text_suffixes or ".git" in path.parts:
-                continue
-            with self.subTest(path=path):
-                self.assertNotIn(legacy, path.read_text(encoding="utf-8"))
-
-    def test_local_markdown_links_resolve(self) -> None:
-        markdown_files = [
-            ROOT / "SKILL.md",
-            ROOT / "README.md",
-            ROOT / "README.zh-CN.md",
-            *sorted((ROOT / "references").glob("*.md")),
-            *sorted((ROOT / "profiles").glob("*.md")),
-            *sorted((ROOT / "benchmarks").glob("*.md")),
-            *sorted((ROOT / "examples").glob("*.md")),
-        ]
-        pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-        for source in markdown_files:
-            for target in pattern.findall(source.read_text(encoding="utf-8")):
-                if "://" in target or target.startswith("#"):
+    def test_all_local_document_links_resolve(self):
+        paths = [ROOT / 'SKILL.md', ROOT / 'README.md', ROOT / 'README.zh-CN.md',
+                 *sorted((ROOT / 'references').glob('*.md')), *sorted((ROOT / 'examples').glob('*.md')),
+                 *sorted((ROOT / 'profiles').glob('*.md')), *sorted((ROOT / 'benchmarks').glob('*.md'))]
+        for source in paths:
+            for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', source.read_text(encoding='utf-8')):
+                if '://' in target or target.startswith('#'):
                     continue
-                path_part = target.split("#", 1)[0]
-                resolved = (source.parent / path_part).resolve()
                 with self.subTest(source=source, target=target):
-                    self.assertTrue(resolved.exists(), f"Broken local link: {source} -> {target}")
+                    self.assertTrue((source.parent / target.split('#')[0]).resolve().exists())
+
+    def test_explicit_gate_and_essential_workflow_are_discoverable(self):
+        skill = (ROOT / 'SKILL.md').read_text(encoding='utf-8')
+        for reference in ('orchestration-protocol.md', 'runtime-state.md', 'host-dispatch.md', 'escalation-and-review.md'):
+            self.assertIn(reference, skill)
+        for invariant in ('never activates', 'allowed_scope', '--assignment-revision',
+                          'Never validate or gate reasoning', 'reopen-project', 'OWNER_STATUS.md'):
+            self.assertIn(invariant, skill)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

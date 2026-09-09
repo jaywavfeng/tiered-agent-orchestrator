@@ -1,43 +1,17 @@
-# One-Worker Handoff
+# One reusable Worker, two assignments
 
-This example shows the user-facing flow, not a transcript that agents must copy.
+This example assumes an Owner-authorized Lead and Worker bound to the same directory. It uses host messaging, not a background Python service. The actual executable/script path comes from the installed skill; run all subcommands through Python.
 
-1. The Owner opens a strong Project Lead conversation and says:
+1. Lead initializes state, writes the plan, registers `worker-1`, and sets active execution. Bind `lead` and `worker-1` using final host task IDs and Owner selection evidence. Keep the Owner's manual model/reasoning settings.
+2. Read the idle Worker's host metadata once and save the normalized observation. Generate `dispatch-context`, reserve `pending` with `record-dispatch`, send the returned prompt via `send_message_to_thread`, then record confirmed `sent` or an accurate failure/unknown result.
+3. Worker starts with the explicit CLI invocation below (replace paths), validates the current revision and scope, implements and validates M1, then records completed status with that revision. Generate `notification-context` and send one callback to the bound Lead.
+4. Lead checks actual results and acceptance, then uses `reassign-worker` to archive M1 and publish M2 as revision 2. Repeat dispatch to the same host task. A late revision-1 message fails the context/status guard and does not execute M2 accidentally.
+5. After M2, Lead performs substantive acceptance and any required review, marks the project complete, and updates handoff/human report once. A completed project answers status without mutation; actionable later work uses `reopen-project` then the same Worker.
 
-   > `$tao Build the repository's new import pipeline, migrate current callers, and run the integration suite.`
+```powershell
+& "<absolute python.exe>" "<absolute skill directory>\scripts\statectl.py" context --project-root "<project directory>" --role worker-1 --assignment-revision 1
+```
 
-2. The Lead inspects the project, initializes `.tiered-agent`, writes the plan, and assigns `worker-1`.
+For a missing binding/tool, manually continue `$tao continue worker-1`, then `$tao continue lead`. For missing native actual/effective metadata, do not create a speculative Worker. For uncertain message delivery, reconcile once; lack of a message in a bounded history page does not prove failure. A timeout is not a milestone; end an unchanged wait without polling.
 
-3. Native dispatch is used only if the host accepts explicit routing and returns machine-readable actual/effective model and reasoning metadata. The Lead requests `model: gpt-5.6-luna` and `reasoning_effort: xhigh`, then requires both returned values to match. Acceptance or echoed arguments alone are insufficient; missing or contradictory evidence fails closed before substantive work. The Worker never recursively self-verifies a native route. When manual fallback is required, the Lead tells the Owner:
-
-   > Open `gpt-5.6-luna` (xhigh recommended), create one economy Worker conversation, and send:
-   >
-   > `$tao continue worker-1`
-
-   In this Owner-created conversation, only a clearly visible model family is checked. Reasoning is never validated or gated: Luna/high, Luna/极高, and any other Luna reasoning setting continue. If the Agent cannot see the model indicator, it continues `worker-1` without asking the Owner to inspect a selector, resend the command, or open another Worker. A clearly wrong model gets one concise correction for the same conversation. Token or credit attribution remains unknown without host per-model/per-conversation telemetry or a documented manual measurement.
-
-4. The Worker reads its repository assignment, implements and validates milestone M1, and marks its assignment `completed`.
-
-5. The Owner returns to the original Lead conversation and says `continue`.
-
-6. The Lead archives M1 and reassigns milestone M2 to the same `worker-1`. No new Worker ID or conversation is created.
-
-7. The Owner returns to the original Worker conversation and sends:
-
-   > `$tao continue worker-1`
-
-8. For management status, the Owner returns to the original Lead conversation and sends:
-
-   > `$tao status`
-
-   The concise human report is `.tiered-agent/OWNER_STATUS.md`; it changes only when the Owner-visible project picture changes.
-
-9. If that Lead conversation or even the Codex account disappears, the Owner opens the repository in a new Lead conversation and sends:
-
-   > `$tao continue lead`
-
-   The Lead reads `STATE.json` and `HANDOFF.md` first, then only current directives, relevant stable plan sections, active role status, blockers, and pending Owner events. It never asks the Owner to reconstruct the chat.
-
-10. After final completion, a read-only `$tao` question leaves the project complete. New actionable `$tao` feedback makes the Lead run `reopen-project`, archive the completion snapshot, and reassign the same `worker-1`; it never initializes a second project merely because the Owner requested a revision.
-
-The Owner never copies the previous conversation. Without an explicit `$tao`, no orchestration state is read or changed—even if `.tiered-agent` already exists. After dispatch, the Lead may passively wait for an event but does not poll `STATUS.json` or duplicate the assignment; a timeout is not a milestone. `worker-2` is created only when a genuinely independent parallel task, distinct responsibility, or materially isolated context makes the extra conversation worth its cost. If the Worker blocks or repeats an identical Luna failure path, it records the evidence, stops, and escalates to Terra first before considering Sol. TAO prefers the simplest mechanism sufficiently reliable for a real failure mode and does not spend the project budget inventing defensive layers.
+Scope/acceptance files, not chat replies, determine the result. See [host dispatch](../references/host-dispatch.md) for argument and normalized receipt details. The synthetic two-assignment acceptance test is `tests/test_relay.py`; it is not a live host run.

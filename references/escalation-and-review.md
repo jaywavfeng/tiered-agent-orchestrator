@@ -13,7 +13,7 @@ A Worker may apply Owner feedback directly only when all are true:
 5. it requires no hidden-intent inference;
 6. the Worker can validate it safely inside its assignment.
 
-Otherwise preserve the Owner's exact words in the inbox, stop conflicting work, update the Worker status, and ask the Owner to return to the original Project Lead conversation.
+Otherwise preserve the Owner's exact words in the inbox, stop conflicting work, update the Worker status, and notify the authorized bound Lead once using the host-dispatch callback. If no binding/tool exists, return the manual Lead continuation.
 
 Completed projects use a different gate: read-only questions are answered without mutation, while actionable work is preserved by `reopen-project` and its completion snapshot. A completed Worker must not create an inbox event inside frozen completed state.
 
@@ -44,7 +44,7 @@ There is no fixed retry count. Continue while each attempt tests a distinct evid
 
 Do not paste full terminal history. Include only the smallest log excerpt needed to reproduce or decide.
 
-After writing it, set the Worker's status to `blocked` and tell the Owner:
+After writing it, set the Worker's status to `blocked` with the current assignment revision. With an authorized binding, send one notification to the Lead as described in [host dispatch](host-dispatch.md). Otherwise tell the Owner:
 
 > Return to the original Project Lead conversation and send: continue handling the current blocker. You do not need to copy any context.
 

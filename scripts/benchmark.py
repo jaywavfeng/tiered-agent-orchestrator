@@ -78,7 +78,7 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     }
     errors: list[str] = []
     missing = sorted(required - record.keys())
-    extra = sorted(record.keys() - required)
+    extra = sorted(record.keys() - required - {"purpose_usage"})
     if missing:
         errors.append("missing fields: " + ", ".join(missing))
     if extra:
@@ -137,7 +137,51 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     for key in ("recorded_at", "notes"):
         if not isinstance(record[key], str):
             errors.append(f"{key} must be a string")
+    usage = record.get("purpose_usage")
+    if "purpose_usage" in record:
+        keys = {"coordination", "task", "unclassified", "source", "evidence", "synthetic"}
+        if not isinstance(usage, dict) or set(usage) != keys:
+            errors.append("purpose_usage must contain coordination, task, unclassified, source, evidence, synthetic")
+        else:
+            counts_valid = all(type(usage[k]) is int and usage[k] >= 0
+                               for k in ("coordination", "task", "unclassified"))
+            if not counts_valid:
+                errors.append("purpose_usage counts must be non-negative integers")
+            elif isinstance(tokens, dict) and sum(usage[k] for k in (
+                    "coordination", "task", "unclassified")) != tokens.get("total"):
+                errors.append("purpose_usage counts must sum to tokens.total")
+            if not isinstance(usage["source"], str) or usage["source"] not in {
+                    "host-purpose-telemetry", "documented-purpose-attribution"}:
+                errors.append("purpose_usage source must identify attribution by purpose, not by model")
+            if not isinstance(usage["evidence"], str) or not usage["evidence"].strip():
+                errors.append("purpose_usage evidence is required")
+            if not isinstance(usage["synthetic"], bool):
+                errors.append("purpose_usage synthetic must be boolean")
     return errors
+
+
+def overhead_result(record: dict[str, Any]) -> dict[str, Any]:
+    """One record covers one complete task run; never pool away an over-budget run."""
+    usage = record.get("purpose_usage")
+    result = {"task_id": record["task_id"], "strategy": record["strategy"],
+              "target_ratio": 0.1, "ratio": None, "within_target": None,
+              "status": "unmeasured", "purpose_usage": usage}
+    if usage is None:
+        result["reason"] = "No attributable purpose measurement"
+    elif usage["synthetic"]:
+        result["status"] = "synthetic"
+        result["reason"] = "Test data is not measured savings evidence"
+    elif not record["success"]:
+        result["reason"] = "Task was not completed successfully"
+    elif usage["unclassified"]:
+        result["reason"] = "Attribution is incomplete"
+    elif not usage["task"]:
+        result["reason"] = "Actual-task denominator is zero"
+    else:
+        result["ratio"] = usage["coordination"] / usage["task"]
+        result["within_target"] = usage["coordination"] * 10 <= usage["task"]
+        result["status"] = "within-target" if result["within_target"] else "over-target"
+    return result
 
 
 def mean(records: list[dict[str, Any]], getter) -> float:
@@ -217,6 +261,7 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
             "user_interventions": tiered["user_interventions"] - baseline["user_interventions"],
             "strong_token_reduction_ratio": reduction,
         },
+        "overhead_by_run": [overhead_result(record) for record in records],
     }
 
 
@@ -240,6 +285,13 @@ def command_aggregate(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_overhead(args: argparse.Namespace) -> int:
+    # Purpose attribution can be inspected without a paired strong-only run.
+    emit = [overhead_result(record) for record in read_records(Path(args.input))]
+    print(json.dumps(emit, indent=2, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate and aggregate paired benchmark JSONL.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -250,6 +302,9 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate_parser.add_argument("input")
     aggregate_parser.add_argument("--output")
     aggregate_parser.set_defaults(func=command_aggregate)
+    overhead_parser = subparsers.add_parser("overhead", help="Report the 10% purpose-based target per completed run")
+    overhead_parser.add_argument("input")
+    overhead_parser.set_defaults(func=command_overhead)
     return parser
 
 

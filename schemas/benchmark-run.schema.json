@@ -24,6 +24,19 @@
     "notes"
   ],
   "properties": {
+    "purpose_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coordination", "task", "unclassified", "source", "evidence", "synthetic"],
+      "properties": {
+        "coordination": {"type": "integer", "minimum": 0},
+        "task": {"type": "integer", "minimum": 0},
+        "unclassified": {"type": "integer", "minimum": 0},
+        "source": {"enum": ["host-purpose-telemetry", "documented-purpose-attribution"]},
+        "evidence": {"type": "string", "minLength": 1},
+        "synthetic": {"type": "boolean"}
+      }
+    },
     "schema_version": { "const": 2 },
     "task_id": { "type": "string", "minLength": 1 },
     "strategy": { "enum": ["strong-only", "tiered"] },

@@ -2,310 +2,98 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**先正确完成，再最大化每个 Token/Credit 的有效工作量。使用最可能正确完成且不会造成昂贵返工的最低成本模型，并让项目在零聊天记录下仍可恢复。**
+**先正确完成任务，再提高每个 token／credit 的实际产出。强模型负责决策，经济模型负责执行，工程文件负责接续。**
 
-一个项目。一个长期保留的经理。可复用的长期 Workers。共享的仓库状态。
+项目状态：**v0.6.0 · Apache-2.0 · Benchmark pending**
 
-> 项目状态：v0.5.0 · Apache-2.0 · Benchmark pending
+> Use the cheapest model that is likely to complete the task correctly without costly rework.
 
-## 为什么需要它
+TAO 是通过 `$tao` 调用的 Codex skill。Project Lead 负责意图、架构和验收；长期复用的经济模型 Worker 负责实现与验证。默认只使用一个 Worker，跨里程碑复用。**你不需要复制任何上一段聊天内容。**
 
-强模型适合理解模糊意图、做架构决策、拆分任务、重大纠偏和困难 Review，但用它持续搜文件、改普通代码、跑命令和重复测试通常并不划算。
+## v0.6.0 更新
 
-`tiered-agent-orchestrator` 把大型工程任务组织成一个小型软件团队：
+- 增加可选任务绑定、简短派发消息、发送回执和完成／阻塞通知，支持已有 Worker 任务自动接力。
+- 自动新建任务仍须用户明确授权，并在实质执行前提供实际生效模型及推理档位证明。当前桌面任务工具契约没有承诺这种证明；创建成功不等于路由已验证。
+- 采用 **纯 TAO 协调 token ÷ 实际任务 token ≤ 10%** 的目标；benchmark 支持可选用途统计。无法归因时标为未测量，不要求日常 token 台账。
+- 按角色生成上下文；普通状态操作只检查当前状态，不反复读取历史。只读查询不再隐式恢复，真实中断通过显式 `recover` 处理。
+- 统一用 Python 解释器运行工具。普通 TAO 操作不得自动把脚本用 VS Code 或文件面板打开。脚本本身没有启动编辑器的实现，含糊的裸脚本调用说明已清理；历史 GUI 触发原因尚未通过原始调用记录复现。
 
-```text
-OWNER
-  └── PROJECT_LEAD（strong）
-        ├── WORKER 1（economy）
-        ├── WORKER 2（economy，仅在真正可并行时）
-        └── REVIEWER（balanced 或 strong，仅在值得时）
-```
+## 安装与启动
 
-Project Lead 把昂贵推理蒸馏成精炼计划和明确任务，Workers 完成大部分实现。运行状态保存在 `.tiered-agent/`，所以切换账号或新开完全空白的 Lead 也能接班。`HANDOFF.md` 是 Lead 的 cold-start 接班包，`OWNER_STATUS.md` 是独立的人类项目经理汇报。
+通过 Codex 的 skill installer 安装仓库 `jaywavfeng/tiered-agent-orchestrator`，仓库内路径为 `.`，安装名为 `tiered-agent-orchestrator`。调用名保持 `tao`；唯一运行依赖是 Python 3.9+，只使用标准库。GitHub 发布不会自动覆盖已有全局安装。
 
-**你不需要复制任何上一段聊天内容。**
-
-### 完成价值优先执行
-
-> **Use the cheapest model that is likely to complete the task correctly without costly rework.**
-
-TAO 的优先级是：先正确完成任务，再减少 strong/Sol 使用量，再减少 credits/成本，再减少不必要的上下文和模型切换，最后才是减少总 Token。目标是每个已完成任务的价值，而不是单次运行的最低成本。Sol 只处理模糊需求、架构、重大决策、高风险 blocker 和最终验收；普通执行默认由 Luna/xhigh Worker 负责。为避免返工，允许 Luna 使用更多 reasoning Token。
-
-模型路由是硬约束。普通执行直接默认 `gpt-5.6-luna / xhigh`，不要为了省一点单次 native reasoning 导致返工。只有宿主既接受显式 `model: "gpt-5.6-luna"`、`reasoning_effort: "xhigh"`，又返回两者的机器可读 actual/effective 值时，才允许原生 dispatch。参数被接受或回显、success 标志和 nickname 都不是证明；元数据缺失或矛盾时必须在实质 native 工作前 fail closed，Sol 也不得接手代做。Owner 自己创建的顶层对话不同：TAO 最多检查明确可见的模型类型，完全不校验、不门控 reasoning。Luna/high、Luna/极高或 Luna 的其他 reasoning 都直接继续；Agent 看不到模型指示时也直接继续，不要求检查 selector 或重发命令。路由证据不等于计费证据：只有宿主按模型/按对话遥测或有记录的人工测量才能把 Token/credits 归因给 Luna。Native Terra 升级和 Reviewer 保留严格门控；手动顶层对话使用较轻规则。
-
-## 它会做什么
-
-- 为整个项目保留一个固定 Project Lead 对话。
-- 默认只使用一个长期 Worker 对话，并在连续 milestones 之间复用它。
-- 只有真正并行、职责或上下文明显不同、上下文隔离收益明确，或原 Worker 已明确停用时才增加 Worker，而且收益必须高于协调和 Token 成本。
-- 每个 Worker 都有目标、写入范围、依赖、禁止修改项和完成标准。
-- 复用稳定 Worker ID 前先归档已完成 assignment，旧任务证据不会被无记录覆盖。
-- 只为新的 actionable Owner 工作 reopen 已完成项目，并先归档不可变的完成快照。
-- 将 Lead 的全局状态与 Worker 自有状态分开，避免并发争写。
-- 把 Review 当作同步屏障；一旦重新进入 execution，旧 Review 证据自动失效并要求重新 Review。
-- 分配 strong-tier Review 前必须记录明确的高风险理由。
-- 升级的是决策和模糊意图，而不是让 Owner 人工搬运消息。
-- 按角色渐进加载上下文，Worker 不读取 Lead 的全部探索过程。
-- 支持新 Lead 用 `$tao continue lead` 在零聊天上下文下按固定、有限顺序接班。
-- 提供简洁的 `OWNER_STATUS.md`，不把给人看的汇报混进机器状态。
-- 优先对现实 failure mode 足够可靠的最简单机制，拒绝推测性的防御层。
-- 提供无第三方依赖的状态校验、状态转换和管理汇总。
-- 提供成对 benchmark 工具，但不发布未经真实测量的节省结论。
-
-它**不会**在无法保证低成本模型时自动切换顶层模型或创建指定模型对话，也不会自动 push、部署生产环境或绕过宿主审批。
-
-## 快速开始
-
-### 1. 安装 Skill
-
-在单个 Codex 仓库中使用时，克隆到仓库级 Skill 目录：
-
-```console
-git clone https://github.com/jaywavfeng/tiered-agent-orchestrator.git .agents/skills/tiered-agent-orchestrator
-```
-
-希望 Codex 对所有项目可发现时，放到：
+新复杂项目先选好 Lead 模型，再描述目标：
 
 ```text
-$HOME/.agents/skills/tiered-agent-orchestrator
+$tao 规划并完成本工程。默认使用一个可复用 Worker，以工程文件保存接续状态。
 ```
 
-其他兼容 Agent Skills 的 Coding Agent 可以把同一个目录安装到它支持的 Skill 位置。可移植接口是根目录 `SKILL.md`；`agents/openai.yaml` 只是可选的 OpenAI 专用元数据。
-
-该 Skill 仅支持显式调用，不会因普通自然语言自动触发。每次编排请求都必须显式包含 `$tao`；仅仅存在 `.tiered-agent`、以前调用过 TAO、或正在修改 TAO 自身，都不能隐式激活 Skill。
-
-### 2. 打开 Project Lead
-
-选择 strong 模型，然后直接用自然语言描述最终目标：
+需要自动接力时，可一次性明确授权：
 
 ```text
-$tao 构建导入流水线、迁移现有调用方，并跑通完整集成测试。
+$tao 自动向我选定的 Worker 任务发送分派，并向 Lead 发送完成或阻塞通知。优先复用已有 Worker。没有合适 Worker 且宿主能在实质执行前证明实际模型与推理档位时，创建 gpt-5.6-luna / xhigh 的新任务，直接使用当前保存的工程目录，不创建隔离 worktree。Lead 保持 gpt-5.6-sol；需要升级时优先使用 gpt-5.6-terra。
 ```
 
-Lead 只读取做架构决策所需的最少入口，创建 `.tiered-agent` 状态，并判断委派是否能减少强模型工作量。常规机械工作必须下放给低成本 Worker；dispatch 后 Lead 可以 passive wait 等待自动推进，但不轮询 `STATUS.json`。timeout 不算 milestone，禁止 timeout → Sol 重新分析 → 查 STATUS → 再 wait 的高频循环。
+Lead 记录已有授权并绑定真实任务 ID，不猜测标题。宿主限制仍然有效。缺少 actual/effective 证明时，由用户先手动创建或选定经济模型任务，发送 `$tao continue worker-1`，之后在授权范围内复用自动接力。Owner-created 会话完全不检查 reasoning：Luna/high、Luna/极高 或看不到模型指示都不要求反复证明；明确看到模型系列错误时只提示修正同一任务一次。
 
-### 3. 只创建一次默认 Worker，之后持续复用
-
-典型提示是：
-
-```text
-创建一个 economy Worker 对话，并发送：
-$tao continue worker-1
-```
-
-进入下一个串行 milestone 时，Lead 会把新任务重新分配给 `worker-1`，Owner 回到原 Worker 对话即可。仅仅切换 milestone 绝不会创建 `worker-2`。
-
-已完成项目后来收到 actionable 反馈时，在原 Lead 对话显式调用 `$tao`。Lead 用 `reopen-project` 归档旧完成态、回到 planning，再把任务重新分配给原 completed Worker。提问、总结、解释、状态查询或尚不明确的意见不会 reopen；方向不清时先澄清，项目保持 complete。
-
-平时在 Worker 对话中工作。遇到 blocker、模糊方向变化、架构决策或想看总进度时，回到最初的 Project Lead 对话：
-
-```text
-$tao status
-```
-
-### 跨 milestone 复用
-
-```text
-Lead:
-$tao 完成这个项目
-
-Worker conversation:
-$tao continue worker-1
-
-M1 完成
-↓
-回到 Lead：继续
-↓
-Lead 将 M2 重新分配给 worker-1
-↓
-回到原 Worker 对话：
-$tao continue worker-1
-```
-
-只有另一项工作真正独立并可并行，或需要明显不同的职责和隔离上下文时，Lead 才应提示 Owner 创建新对话：
-
-```text
-$tao continue worker-2
-```
-
-### 零聊天上下文 Lead 接班
-
-切换 Codex 账号，或在完全没有旧消息的新 strong-model 对话中进入同一个仓库，发送：
-
-```text
-$tao continue lead
-```
-
-新 Lead 不需要 Owner 复述项目。它先读 `STATE.json` 和 `HANDOFF.md`，再读当前 `OWNER_DIRECTIVES.md`、`PLAN.md` 的相关稳定章节，以及活跃 Worker/Reviewer 状态与 blocker。这组有限状态必须能回答：最终目标、已完成工作、当前位置、各角色状态、重要决策和约束、已验证结果、blocker、下一步，以及是否需要 Owner 决定。只有这些证据指出具体矛盾时，才读取代码、diff 或历史归档。
-
-Owner 平时直接打开 `.tiered-agent/OWNER_STATUS.md` 看人类可读全局汇报。它只在 milestone、blocker、重要结果/风险变化、completion、reopen 或 Owner 决策变化时更新，不在每条命令后更新。
-
-### Dispatch 生命周期
-
-理想的原生模式（仅限返回回执证明 actual/effective model 与 reasoning 的宿主）：
-
-```text
-Owner
-  ↓
-Sol Project Lead
-  ↓
-显式 spawn gpt-5.6-luna / xhigh worker-1
-  ↓
-Lead passive wait 等待事件（timeout 不算 milestone）
-  ↓
-Luna 完成检查 / 实现 / 训练
-  ↓
-milestone event
-  ↓
-Sol 读取摘要并决定下一阶段
-  ↓
-Lead 重新分配同一个 worker-1
-```
-
-effective model/reasoning 元数据缺失、不受支持、被拒绝或互相矛盾时：
-
-```text
-Sol Project Lead 准备 worker-1，并停止未经确认的 native Worker
-  ↓
-Sol 停止
-  ↓
-Owner 打开 gpt-5.6-luna（建议 xhigh）并发送：
-$tao continue worker-1
-```
-
-对 Owner 自己创建的对话，只检查明确可见的模型类型，完全不检查 reasoning：Luna/high、Luna/极高或 Luna 的其他 reasoning 都继续。Agent 看不到模型指示时，直接继续原 Worker，不要求 Owner 检查 selector、重发命令、提供证明或新建 Worker。明确显示模型错误时，最多简短提醒一次并保留同一对话。计费归因仍需宿主遥测或有记录的人工测量。TAO 不会在 dispatch 后持续轮询或重复 Worker 工作；一次 passive wait 没有新事件便结束等待，不再触发 Sol 分析循环。Luna 同一失败方案无新证据时必须停止，先升级 Terra，不得无意义重试。
-
-## 命令
-
-| 调用 | 行为 |
+| 操作 | 请求 |
 |---|---|
-| `$tao <目标>` | 先做复杂度门控，只为合适的工作初始化 Project Lead |
-| `$tao continue worker-1` | 仅凭仓库状态继续一个明确 Worker |
-| `$tao continue reviewer-1` | 继续 Lead 明确创建的 Review |
-| `$tao status` | 汇总机器/角色状态并指向 Owner 汇报 |
-| `$tao continue lead` | 让任何新旧 Lead 仅凭仓库状态 cold-start 或重新同步 |
+| 零聊天历史接续 Lead | `$tao continue lead` |
+| 继续已有 Worker | `$tao continue worker-1` |
+| 继续已登记且确实独立的 Worker | `$tao continue worker-2` |
+| 查询状态 | `$tao status` |
 
-简单、局部、低风险任务由当前 Agent 直接完成，不创建完整组织状态。
+维护 TAO 本身、粘贴示例或存在 `.tiered-agent` 都不会隐式启动编排。简单局部任务直接完成。
 
-## 运行时状态
+## 工程状态与自动接续
 
-```text
-.tiered-agent/
-├── STATE.json
-├── PLAN.md
-├── OWNER_DIRECTIVES.md
-├── HANDOFF.md
-├── OWNER_STATUS.md
-├── inbox/owner/<event-id>.md
-├── history/completion-<revision>/
-│   └── 完整的全局、Worker 与 Review 完成快照
-├── workers/<worker-id>/
-│   ├── TASK.md
-│   ├── STATUS.json
-│   ├── BLOCKER.md
-│   └── history/assignment-<revision>/
-│       ├── TASK.md
-│       ├── STATUS.json
-│       └── BLOCKER.md
-└── review/
-    ├── TASK.md
-    ├── STATUS.json
-    ├── REPORT.md
-    └── history/review-<revision>/
-```
+Lead 维护目标、指令、全局状态、任务分配及可选 `TRANSPORT.json`；Worker 只维护允许范围内代码、自己的状态和阻塞证据。`HANDOFF.md` 是精简冷启动说明；`OWNER_STATUS.md` 是人类报告，不是机器状态数据库。每个事实只保留一个权威来源。
 
-`STATE.json` 保持很小，不保存聊天记录、隐藏推理、secret、终端历史或具体模型名。`PLAN.md` 是最终目标、完成标准、决策、约束、milestones、分工和验证策略的稳定来源；`OWNER_DIRECTIVES.md` 保存当前有效的 Owner 方向；Worker/Reviewer 文件保存局部技术证据；`HANDOFF.md` 是精简的 Lead cold-start 接班包；`OWNER_STATUS.md` 是派生的人类汇报，不能覆盖机器权威状态。
+Lead 先写好 ready 分派，核实绑定任务的目录和可用状态，生成简短消息，记录 `pending`，调用 `send_message_to_thread`，再记录 `sent`、明确未送达的 `not-sent` 或 `unknown`。待定／不明确回执禁止盲目重发。Worker 检查分派版本后执行、验证并更新结果，在完成或阻塞时通知 Lead 一次。消息送达不代表任务验收通过。
 
-每个事实只在其权威文件记录一次。摘要负责压缩和指向细节，不复制技术流水账；只在 meaningful transition 更新。
+使用有界、带游标的 `wait_threads`。一次无变化超时后结束等待，后续通知可唤醒空闲 Lead；不做定时轮询或重复摘要。`reassign-worker` 归档完成分派后复用同一 Worker；针对完成项目的实质修改先通过 `reopen-project` 留存快照。没有传输配置的旧工程继续人工接力。
 
-全局状态、计划、正式 Owner 指令、任务分配和 assignment 归档只有一个写入者：PROJECT_LEAD。每个 Worker 只能写自己的代码范围、当前状态、blocker 和唯一命名的 Owner 反馈事件。任务完成后，只有 Lead 的 reassignment 事务可以归档这些文件并把 Worker 重置为 `ready`。
+完整宿主流程和回执格式见 [host dispatch](references/host-dispatch.md)，两次分派示例见 [one Worker flow](examples/one-worker-flow.md)。内部子代理也受严格模型证明门槛约束，不能自动视为用户已配置好的独立任务。
 
-## 状态辅助工具
+## 通过 Python 执行工具
 
-Python 3.9+ 是唯一运行依赖，工具只使用标准库。初始化不会覆盖已有状态；reopen 会快照完成项目；Worker 与 Review reassignment 会保留旧证据。已有 recovery 行为只是脚本内部兼容细节，正常工作不要求 Agent 审计它。
+在本仓库中使用：
 
 ```console
-python scripts/statectl.py init --project-root /path/to/project --project-id my-project --profile generic
-python scripts/statectl.py add-worker --project-root /path/to/project --worker-id worker-1 --objective "Implement the parser" --allowed-scope "src/parser/**" --completion-criterion "Parser tests pass"
-python scripts/statectl.py reopen-project --project-root /path/to/project --reason "Owner requested a correction" --milestone "M2 correction"
-python scripts/statectl.py reassign-worker --project-root /path/to/project --worker-id worker-1 --milestone "M2" --objective "Integrate the parser" --allowed-scope "src/integration/**" --completion-criterion "Integration tests pass"
-python scripts/statectl.py resolve-owner-feedback --project-root /path/to/project --event-id <event-id> --resolution "Integrated into M2"
-python scripts/statectl.py validate --project-root /path/to/project
+python scripts/statectl.py --help
+python scripts/statectl.py init --project-root /path/to/project --project-id my-project
+python scripts/statectl.py add-worker --project-root /path/to/project --worker-id worker-1 --objective "Implement parser" --allowed-scope "src/**" --completion-criterion "Parser tests pass"
+python scripts/statectl.py context --project-root /path/to/project --role worker-1
 python scripts/statectl.py status --project-root /path/to/project
+python scripts/statectl.py validate --project-root /path/to/project
 ```
 
-没有 Python 时，Agent 可以手动维护这些文件，但必须遵守 schema 和所有权规则。
+从 Windows 全局安装调用时，使用实际绝对路径：
 
-## 模型 Profiles
+```powershell
+& "<python.exe 的绝对路径>" "<技能目录的绝对路径>\scripts\statectl.py" context --project-root "<工程目录>" --role worker-1
+```
 
-核心协议只认识 `strong`、`balanced` 和 `economy`。
+替换占位符，并正确引用包含空格和中文的路径。使用环境中已核实的解释器。不得直接启动 `.py` 文件、用 `code`／`Invoke-Item` 打开它，或把编辑器打开当成命令成功。参数不清楚时运行对应子命令的 `--help`；只有具体诊断需要才读取源码。无需修改文件关联或编辑器设置。
 
-- [OpenAI Codex Profile](profiles/openai-codex.md) 映射当前 Sol/Terra/Luna 系列。
-- [通用 Profile](profiles/generic.md) 说明如何映射其他宿主或模型提供方。
+新增子命令为 `bind-thread`、`context`、`dispatch-context`、`record-dispatch`、`notification-context`、`recover`。自动接力的状态写入带 `--assignment-revision`。普通 `status` 不再返回归档数量，因为不再扫描历史；显式 `validate` 仍完整检查历史。原有所有权、依赖、写入范围、完成门槛和审查失效规则保持有效。
 
-Profile 是可编辑建议。替换具体模型映射不会改变项目持久化状态。
+## 管理开销与验证
 
-## Owner 反馈与 Blocker
+目标为同一完成任务累计的 **协调 token ÷ 实际任务 token ≤ 0.10**。架构设计和实质验收属于实际任务，即便由 Lead 完成；协议加载、派发、管理记录和重复状态检查属于协调。按模型或会话划分不能替代按用途归因，不能用账户总额度或猜测 token 数证明比例。
 
-明确、局部的 Owner 纠正由 Worker 直接执行。如果 Owner 说“这个方向太工程化了”之类的高层反馈，Worker 不会擅自翻译成架构修改，而是保存 Owner 原话、暂停冲突工作并把决策交回原 Project Lead。
-
-完成态被冻结但可以 reopen。Lead 对只读 follow-up 直接回答且不改状态；actionable 工作先快照旧完成态、显式 reopen，再复用原 Worker。Owner event 只从 frontmatter 读取状态，Owner 原文无法伪造 pending event。
-
-升级策略基于证据，而不是“失败三次必停”。只要每次尝试都验证新的明确假设，Worker 可以继续；当它开始重复同类失败且没有新证据时就停止。
-
-## 足够可靠，而不是防御性表演
+benchmark 记录可选增加 `purpose_usage`。数据来源、分类不完整和模拟数据规则见 [测量协议](benchmarks/README.md)。只有成功完成、归因完整且非模拟的记录才判定比例。超过 10% 时合并任务、缩减重复上下文与管理汇报，不削弱实际验证。
 
 > **Prefer the simplest mechanism that is sufficiently reliable for the actual failure modes of the project.**
 
-TAO 默认使用简单仓库文件、机器状态的原子替换、基础 schema/reference/ownership 校验，以及真实错误出现后的定向重读。不会为了理论边缘情况要求 Agent 增加 hash、checksum tree、freshness marker、多层 gate、周期审计或 recovery-of-recovery。只有存在具体且影响明显的 failure mode，并且预期收益明显高于代码复杂度、维护、上下文和 Token 成本时，才增加保护。
-
-Lead 不主动做全仓 audit、安全 sweep 或状态一致性扫描。没有问题证据时，应把预算花在推进 Owner 的真实交付物上。
-
-## Review 策略
-
-低风险且验证充分的工作可以不创建独立 Review。中大型修改通常使用 balanced Reviewer。只有高风险、核心算法、架构、安全或多 Worker 集成任务才使用 strong Reviewer。
-
-Review 后代码一旦变化，旧 approval 立即失效。TAO 保留旧证据、要求新的 Review，并在发布新 Review assignment 时归档旧 Review。
-
-## Benchmark
-
-Benchmark pending.
-
-仓库包含配对 JSONL schema 和聚合工具，用于比较：
-
-- strong-model-only 全程执行；
-- strong Lead + economy Workers + 可选 Review 的分层执行。
-
-记录内容包括任务成功、测试通过率、总 Token 和分层 Token、可选成本或 credits、耗时、模型切换、Worker 对话数、升级次数和 Owner 干预。详见 [benchmark 协议](benchmarks/README.md)。发布可比的真实运行数据前，不声明任何节省百分比。
-
-## 验证
+不建立常驻台账、周期审计、校验和树或额外恢复系统。只报告实际测得的文档、读取和协调动作变化，不把代理指标说成真实 token／credit 节省。公开节省证据继续标记为 **Benchmark pending**。
 
 ```console
 python -m unittest discover -s tests -v
-python scripts/statectl.py --help
 python scripts/benchmark.py --help
+python scripts/benchmark.py overhead benchmarks/runs.jsonl
 ```
 
-测试覆盖初始化、completed project reopen/history、schema 与路径安全、Worker 复用、依赖与写域冲突、陈旧 Review 防护、Owner 原话保存、零聊天 Lead 接班、Owner 汇报生命周期、最简充分可靠原则、显式激活与模型路由契约、全部行为契约，以及 benchmark 归因与聚合。
+`runs.jsonl` 由实际测量提供，仓库不附带伪造的真实数据。测试使用隔离临时工程与模拟宿主回执，CI 覆盖 Windows／Ubuntu × Python 3.9／3.13。`evals/` 中场景定义不等于已经执行真实 Agent 测试；模拟接力也不能证明真实桌面自动新建或 GUI 行为已通过。
 
-## 兼容性与当前限制
-
-- 不同对话必须共享一个可写仓库。
-- v1 由 Owner 手动打开指定模型的顶层对话。
-- 仓库状态可以在宿主对话丢失后恢复同一个 formal Worker，但 TAO 无法复活宿主本身已经丢失的 conversation object。
-- 旧 schema-v1 runtime 即使没有 `OWNER_STATUS.md` 仍然有效；Lead 在下一次 meaningful transition 创建它，不需要迁移框架或状态 hash。
-- 既有内部 crash-recovery 行为继续兼容，但正常 Agent 不检查也不扩展它，除非具体 validation error 指向相关文件。
-- 不同宿主的模型和 reasoning 名称可能不同，必要时使用通用 Profile。Owner 创建的对话绝不根据 reasoning 标签门控 continuation。
-- Native effective metadata 只证明 native 路由，不证明计费；手动路由由 Owner 控制。Token 与 credits 归因必须来自宿主按模型/按对话遥测或有记录的人工测量，否则记为 unknown。
-- SkillsMP 独立按自己的周期扫描公开 GitHub 仓库；发布仓库不能保证立刻完成索引。
-
-项目结构遵循 [Agent Skills 规范](https://agentskills.io/specification)和[官方 OpenAI Skill 文档](https://learn.chatgpt.com/docs/build-skills)。OpenAI 模型映射依据[官方模型说明](https://learn.chatgpt.com/docs/models)。
-
-## 卸载
-
-从 Agent 的 Skill 目录删除本项目即可。项目运行状态与 Skill 安装相互独立；只有在明确希望丢弃某个项目的编排历史时，才删除该项目的 `.tiered-agent/`。
-
-## 许可证
-
-Apache-2.0，详见 [LICENSE](LICENSE)。
+发布证据与测量边界见 [v0.6.0 验证说明](benchmarks/v0.6.0-validation.md)。Git 发布、生产部署和全局配置修改仍需用户授权。

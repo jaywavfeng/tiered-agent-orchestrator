@@ -451,7 +451,7 @@ def validate_completion_history(runtime: Path, project_id: str) -> list[str]:
     return errors
 
 
-def validate_runtime(runtime: Path) -> list[str]:
+def validate_runtime(runtime: Path, *, include_history: bool = True) -> list[str]:
     errors: list[str] = []
     for name in ("STATE.json", "PLAN.md", "OWNER_DIRECTIVES.md", "HANDOFF.md"):
         if not (runtime / name).is_file():
@@ -551,7 +551,8 @@ def validate_runtime(runtime: Path) -> list[str]:
         blocker_file = worker_dir / "BLOCKER.md"
         if not blocker_file.is_file():
             errors.append(f"{prefix}: blocker file does not exist: {blocker_file}")
-        errors.extend(validate_assignment_history(worker_dir, worker_id))
+        if include_history:
+            errors.extend(validate_assignment_history(worker_dir, worker_id))
         if not status_file.is_file():
             errors.append(f"{prefix}: status file does not exist: {status_file}")
             continue
@@ -670,14 +671,15 @@ def validate_runtime(runtime: Path) -> list[str]:
             ):
                 errors.append("STATE.json: complete project has unfinished required review")
 
-    errors.extend(validate_review_history(runtime / "review"))
-    errors.extend(validate_completion_history(runtime, state["project_id"]))
+    if include_history:
+        errors.extend(validate_review_history(runtime / "review"))
+        errors.extend(validate_completion_history(runtime, state["project_id"]))
 
     return errors
 
 
 def assert_valid(runtime: Path) -> None:
-    errors = validate_runtime(runtime)
+    errors = validate_runtime(runtime, include_history=False)
     if errors:
         raise StateError("Runtime validation failed:\n- " + "\n- ".join(errors))
 
@@ -1161,6 +1163,9 @@ def command_reassign_worker(args: argparse.Namespace) -> int:
     worker_dir = checked_relative_path(
         runtime, entry["task_path"], "worker.task_path"
     ).parent
+    history_errors = validate_assignment_history(worker_dir, args.worker_id)
+    if history_errors:
+        raise StateError("\n".join(history_errors))
     status_path_value = checked_relative_path(
         runtime, entry["status_path"], "worker.status_path"
     )
@@ -1287,6 +1292,11 @@ def command_set_worker_status(args: argparse.Namespace) -> int:
     registry = {item["id"]: item for item in state["workers"]}
     if args.worker_id not in registry:
         raise StateError(f"Unknown Worker: {args.worker_id}")
+    expected_revision = getattr(args, "assignment_revision", None)
+    if expected_revision is not None:
+        from relay import worker
+        if worker(sys.modules[__name__], runtime, args.worker_id)[3] != expected_revision:
+            raise StateError("Stale assignment status update")
     status_path_value = checked_relative_path(
         runtime, registry[args.worker_id]["status_path"], "worker.status_path"
     )
@@ -1338,6 +1348,9 @@ def completion_history_revisions(runtime: Path) -> list[int]:
 def archive_project_completion(runtime: Path, reason: str) -> int:
     runtime = runtime.resolve()
     state = load_state(runtime)
+    history_errors = validate_completion_history(runtime, state["project_id"])
+    if history_errors:
+        raise StateError("\n".join(history_errors))
     current_state_text = state_path(runtime).read_text(encoding="utf-8")
     history_dir = runtime / "history"
     history_dir.mkdir(exist_ok=True)
@@ -1656,6 +1669,9 @@ def command_assign_review(args: argparse.Namespace) -> int:
     root = project_root(args.project_root)
     runtime = runtime_dir(root)
     assert_valid(runtime)
+    history_errors = validate_review_history(runtime / "review")
+    if history_errors:
+        raise StateError("\n".join(history_errors))
     if not REVIEWER_ID_RE.fullmatch(args.reviewer_id):
         raise StateError("reviewer-id must match reviewer-N with N greater than zero")
     if args.level not in {"balanced", "strong"}:
@@ -1904,7 +1920,6 @@ def status_snapshot(runtime: Path) -> dict[str, Any]:
                 else ("Review is required but not assigned." if state["review"]["required"] else "")
             ),
         },
-        "completion_history": len(completion_history_revisions(runtime)),
         "owner_status": "OWNER_STATUS.md" if (runtime / "OWNER_STATUS.md").is_file() else None,
         "pending_owner_feedback": len(pending_owner_events(runtime)),
         "next_action": state["next_action"],
@@ -1936,7 +1951,6 @@ def render_status(snapshot: dict[str, Any]) -> str:
         )
     )
     lines.append(f"Pending Owner feedback: {snapshot['pending_owner_feedback']}")
-    lines.append(f"Prior completions: {snapshot['completion_history']}")
     lines.append(
         "Owner summary: "
         + (
@@ -1953,6 +1967,14 @@ def render_status(snapshot: dict[str, Any]) -> str:
 def command_validate(args: argparse.Namespace) -> int:
     runtime = runtime_dir(project_root(args.project_root))
     errors = validate_runtime(runtime)
+    if not errors and (runtime / "TRANSPORT.json").exists():
+        from relay import load_transport, bound
+        try:
+            transport = load_transport(sys.modules[__name__], runtime)
+            for role in transport["bindings"]:
+                bound(sys.modules[__name__], runtime, transport, role)
+        except StateError as exc:
+            errors.append(str(exc))
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
@@ -2027,6 +2049,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_parser.add_argument("--next-action", default="")
     worker_parser.add_argument("--files-changed", action="append")
     worker_parser.add_argument("--verification", action="append")
+    worker_parser.add_argument("--assignment-revision", type=int, help="Reject stale relay status writes")
     worker_parser.set_defaults(func=command_set_worker_status)
 
     project_parser = subparsers.add_parser("set-project", help="Update Project Lead-owned global state")
@@ -2090,6 +2113,11 @@ def build_parser() -> argparse.ArgumentParser:
     common_project_root(status_parser)
     status_parser.add_argument("--json", action="store_true", help="Emit a JSON snapshot")
     status_parser.set_defaults(func=command_status)
+    recover_parser = subparsers.add_parser("recover", help="Explicitly recover a reported interrupted update")
+    common_project_root(recover_parser)
+    recover_parser.set_defaults(func=command_status, json=False)
+    from relay import add_commands
+    add_commands(subparsers, sys.modules[__name__])
     return parser
 
 
@@ -2099,9 +2127,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.command != "init":
             runtime = runtime_dir(project_root(args.project_root))
-            recover_pending_worker_additions(runtime)
-            recover_pending_review_assignment(runtime)
-            recover_pending_reassignments(runtime)
+            if args.command in {"status", "validate", "context", "dispatch-context", "notification-context"}:
+                markers = [*runtime.glob(f"{ADD_WORKER_MARKER_PREFIX}*.json"),
+                           *runtime.glob(f"workers/*/{REASSIGNMENT_MARKER}"),
+                           *runtime.glob(f"review/{REVIEW_ASSIGNMENT_MARKER}")]
+                if markers:
+                    raise StateError("Pending update; run the recover subcommand through Python: "
+                                     + ", ".join(str(p) for p in markers))
+            else:
+                recover_pending_worker_additions(runtime)
+                recover_pending_review_assignment(runtime)
+                recover_pending_reassignments(runtime)
         return int(args.func(args))
     except StateError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
