@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
@@ -41,6 +43,14 @@ def record(task_id: str, strategy: str, strong: int, economy: int) -> dict:
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_cli_help_exits_successfully(self):
+        for args in (["--help"], ["overhead", "--help"]):
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                with self.assertRaises(SystemExit) as result:
+                    benchmark.main(args)
+            self.assertEqual(result.exception.code, 0)
+            self.assertIn("usage:", output.getvalue())
+
     def purpose_record(self, coordination=10, task=100, unclassified=0, synthetic=False):
         value = record("purpose-fixture", "tiered", coordination, task + unclassified)
         value["purpose_usage"] = {

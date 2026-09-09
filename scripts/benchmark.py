@@ -302,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate_parser.add_argument("input")
     aggregate_parser.add_argument("--output")
     aggregate_parser.set_defaults(func=command_aggregate)
-    overhead_parser = subparsers.add_parser("overhead", help="Report the 10% purpose-based target per completed run")
+    overhead_parser = subparsers.add_parser("overhead", help="Report the 10 percent purpose-based target per completed run")
     overhead_parser.add_argument("input")
     overhead_parser.set_defaults(func=command_overhead)
     return parser
